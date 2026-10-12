@@ -42,7 +42,7 @@ the dashboard, preferences and reading traces.
 ## Read more
 
 - **Docs site**: <https://mercury-harness.readthedocs.io> (the same pages are in [docs/](docs/)).
-- **Blog**: [A cheap model with a hard ceiling](https://www.henrytowbin.com/posts/2026-mercury-coding-agent/)
+- **Blog**: [Mercury 2.5: a cheap diffusion LLM with a hard ceiling](https://www.henrytowbin.com/posts/2026-mercury-coding-agent/)
   and its [supplement](https://www.henrytowbin.com/notes/2026-mercury-coding-agent-supplement/) with the full tables.
 - **[FINDINGS.md](FINDINGS.md)**: the results in one table, each with its run count, interval
   where there was a rule, section and results file.
