@@ -29,6 +29,7 @@ This is research code. The measurements are the part most worth reading: start w
 
 quickstart
 usage
+tui
 cli
 architecture
 skills

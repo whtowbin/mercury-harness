@@ -436,6 +436,8 @@ Views (`--view`): outcome: accuracy, cost and time (the default). diagnostics: w
 
 ## Following along in the terminal
 
+The dashboard has its own page, with screenshots: {doc}`tui`.
+
 In `--tui`, press <kbd>p</kbd> (or <kbd>ctrl+p</kbd>, which works even while
 the goal/answer bar has focus — see below) to open a settings panel with a
 dropdown for approval mode, narrate, animate and quick-answers
