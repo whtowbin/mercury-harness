@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+traces/
+sandbox*/
+.ruff_cache/
+results/*
+!results/*.jsonl
+!results/s94-harness-compare.txt
+!results/s95-scout.txt
+docs/_build/
+dist/
+profiling/

@@ -1,0 +1,25 @@
+# Overrides on top of SearXNG's own defaults. web_search reads the JSON API,
+# which SearXNG ships disabled; enabling it is the one change that matters.
+use_default_settings: true
+
+server:
+  # The rate limiter guards a public instance from bots. This one is
+  # localhost-only and its only client is the harness, a bot by definition.
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+
+# Engines that answer from this machine when the default set does not. On 2026-09-30
+# Google CSE, Brave and DuckDuckGo were all blocking its IP (suspended, CAPTCHA), and
+# every query returned nothing (DESIGN-LOG §89.1). Yahoo answered. Mojeek never loaded: the
+# image marks it `inactive: true`, which `disabled: false` does not override. Set active on a
+# test instance it was blocked too, as were Bing and Qwant (DESIGN-LOG §115).
+engines:
+  - name: yahoo
+    disabled: false
+  - name: mojeek
+    disabled: false

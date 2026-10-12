@@ -1,0 +1,6 @@
+# Docs-only dependencies, kept separate from pyproject.toml so building the
+# harness itself never needs Sphinx installed.
+sphinx>=8.0
+furo>=2024.8
+myst-parser>=4.0
+sphinx-autodoc-typehints>=2.3

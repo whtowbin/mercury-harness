@@ -1,0 +1,190 @@
+[project]
+name = "mercury-harness"
+dynamic = ["version"]  # agent/__init__.py __version__, the one place it is written
+description = "A plan/execute/review coding agent built to test Mercury 2.5, Inception's diffusion LLM, on OpenRouter"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Henry Towbin" },
+]
+keywords = ["llm", "agent", "coding-agent", "diffusion-model", "openrouter", "mercury", "benchmark"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    # POSIX only: process groups (os.killpg), /bin/sh and start_new_session. Windows does not work.
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+# Floors: the lowest versions the full suite passed on (Python 3.11, `uv sync --resolution
+# lowest-direct`, 11 Oct), raised where an older release has a published security fix missing.
+# typer below 0.15.4 does not cap click and breaks on click 8.2+.
+dependencies = [
+    "requests>=2.32.4",  # security floor: CVE-2024-35195 (2.32.0), CVE-2024-47081 (2.32.4)
+    "python-dotenv>=1.0",
+    "typer>=0.15.4",
+    "rich>=14.2",
+    "pypdf>=6.19.0",  # security floor: pypdf parses untrusted PDFs; older releases have DoS fixes missing
+    # agent/userconfig.py's per-user config folder. It used to arrive only through textual.
+    "platformdirs>=3.6",
+]
+
+[project.optional-dependencies]
+# Optional: agent/relevance.py's Jev-backed judge. Everything it does also
+# works without this installed -- a user with no TypeSafe API key gets the
+# LLM-backed or heuristic judge instead (see relevance.build_judge), never a
+# hard failure. Install with `uv sync --extra jev`.
+jev = ["typesafe-sdk>=0.7.0"]
+# The dashboard (`harness-tui`, `harness run --tui`). Without it the plain console runs as
+# before, and asking for the dashboard says how to install it.
+tui = ["textual>=8.2.8"]
+# `harness trace sql`: DuckDB queries over trace events.
+analysis = ["duckdb>=1.5.5"]
+# API keys in the system keyring on Linux (Secret Service: GNOME Keyring, KWallet) or Windows,
+# for `harness setup` and every key lookup (agent/keystore.py). macOS uses its Keychain without it.
+keyring = ["keyring>=25"]
+
+[project.urls]
+Repository = "https://github.com/whtowbin/mercury-harness"
+Documentation = "https://mercury-harness.readthedocs.io"
+Issues = "https://github.com/whtowbin/mercury-harness/issues"
+
+[project.scripts]
+harness = "agent.cli:main"
+# The dashboard as its own executable. Same flags as `harness run`, with --tui
+# already on, so it can be launched from a desktop entry or a shell alias
+# without a subcommand.
+harness-tui = "agent.cli:tui_main"
+bench = "bench.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+    "ty>=0.0.1a10",
+    "pytest>=8.0",
+    # Optional: `pytest -n auto` (or a number). Off unless asked for -- plain
+    # `pytest` is still single-process, exactly as before. Measured safe and
+    # fast for this suite (1396 tests, 87s -> ~10s, two clean back-to-back
+    # runs) after fixing the one real interaction it exposed (test_cli.py's
+    # terminal-width-dependent output assertions) -- see DESIGN-LOG.md.
+    "pytest-xdist>=3.6",
+    # In-process TUI tests only (test_tui.py) -- see that file's own
+    # docstring for why it used to run each test in a subprocess and
+    # doesn't anymore.
+    "pytest-asyncio>=0.24",
+    # Cognitive complexity, surfaced to the agent through the
+    # check_complexity tool and enforced at commit time by prek.
+    "complexipy>=5.1",
+    "duckdb>=1.5.5",
+    # The optional dashboard's tests (test_tui.py) need it installed in development.
+    "textual>=8.2.8",
+    # agent/keystore.py's keyring path, tested with an in-memory backend.
+    "keyring>=25",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "agent/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent", "bench"]
+# bench/fixtures ships hidden tests and reference solutions as .py files that
+# are never imported by this package itself (they run inside a generated
+# workspace) — hatchling's default source-scan would otherwise treat them as
+# ordinary package modules.
+artifacts = ["agent/skills_data/*.md", "bench/fixtures/**"]
+
+[tool.hatch.build.targets.sdist]
+# An allowlist: hatchling's sdist takes every untracked, non-ignored file, so an exclude list
+# let local session folders and private notes in (scripts/release_check.py dist).
+# The sdist exists to build the wheel; tests and scripts ship in the git repository.
+only-include = ["agent", "bench", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+# Sandboxes hold code the agent generated; it is not part of this test suite.
+testpaths = ["tests"]
+norecursedirs = ["sandbox*", ".venv", "traces", "bench/fixtures"]
+# Registered so `-m slow` / `-m "not slow"` work; the default run still
+# includes them -- see the marker's own docstring in test_bench.py for why
+# skipping them by default would be the wrong trade for this particular repo.
+markers = ["slow: needs a real OS-level wait (a process kill, a socket timeout) and cannot be sped up without testing something else"]
+# "strict": an async test needs its own explicit @pytest.mark.asyncio, rather
+# than every async def in the suite silently becoming a collected test. Only
+# test_tui.py uses this so far -- see that file's own docstring.
+asyncio_mode = "strict"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# bench/fixtures are templates executed inside generated workspaces; the
+# modules they import only exist there.
+extend-exclude = ["sandbox*", "traces", "bench/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "B904",   # tools deliberately return error strings rather than chaining raises
+    "SIM108", # ternaries are not always clearer here
+]
+
+[tool.ruff.lint.per-file-ignores]
+"agent/prompts.py" = ["E501"]  # prompt text reads better unwrapped
+"agent/tui.py" = ["RUF012"]    # BINDINGS as a mutable class attribute is Textual's own API
+
+[tool.ty.src]
+exclude = ["sandbox*", "traces", "bench/fixtures"]
+
+[[tool.ty.overrides]]
+# The SSRF-safe connections subclass http.client and reach its private
+# attributes (_tunnel_host, _tunnel, _context) on purpose: they must reproduce
+# stdlib connect() exactly, with only the dialed address swapped.
+include = ["agent/tools/web.py"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+
+[[tool.ty.overrides]]
+# Tests pass small duck-typed doubles (_Trace, _Ctx, _FakeClient) where the real
+# Trace/ToolContext/ChatClient is expected, and read attributes off them. That is
+# the intended pattern (mock what the assertions don't examine; DESIGN-LOG §27-28), so
+# structural-mismatch rules are off here; every other rule still applies.
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"  # monkeypatching methods on instances
+unresolved-attribute = "ignore"
+
+[[tool.ty.overrides]]
+# The blog figures' plotting stack (matplotlib, seaborn, numpy, pandas) and the blog
+# tables' great_tables are not project dependencies: each script runs with
+# `uv run --with ...`, as its docstring says, so those imports cannot resolve here.
+# Every other rule applies.
+include = [
+    "scripts/analysis/post_figures.py",
+    "scripts/analysis/post_tables.py",
+    "scripts/analysis/post1_new_figures.py",
+    # The docs build's Sphinx and docutils, installed from docs/requirements.txt.
+    "docs/conf.py",
+]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[tool.ty.rules]
+# The tool dispatcher calls every tool through one **kwargs seam.
+unknown-argument = "ignore"

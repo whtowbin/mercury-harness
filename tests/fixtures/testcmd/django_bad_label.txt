@@ -1,0 +1,19 @@
+no_such_module (unittest.loader._FailedTest) ... ERROR
+
+======================================================================
+ERROR: no_such_module (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: no_such_module
+Traceback (most recent call last):
+  File "/PYTHON/lib/python3.8/unittest/loader.py", line 154, in loadTestsFromName
+    module = __import__(module_name)
+ModuleNotFoundError: No module named 'no_such_module'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+Testing against Django installed in '/WORKSPACE/django'
+Skipping setup of unused database(s): default, other.
+System check identified no issues (0 silenced).

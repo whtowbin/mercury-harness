@@ -1,0 +1,32 @@
+{
+  "goal": "add a sum function to math.py",
+  "draft": [
+    "The task is to add a sum function to the existing math.py module",
+    "The function should take a list of numbers and return their sum",
+    "We need to write the function and add tests for it"
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "title": "Write the sum function",
+      "intent": "Provide a sum() function that adds a list of numbers",
+      "acceptance": "sum([1, 2, 3]) returns 6",
+      "signatures": ["def sum(numbers: list[int | float]) -> int | float"],
+      "tests": ["test_sum_basic", "test_sum_floats", "test_sum_empty"],
+      "files": ["math.py"],
+      "writes": ["math.py"],
+      "verify": "uv run pytest tests/test_math.py::test_sum -xvs",
+      "depends_on": []
+    },
+    {
+      "id": "step-2",
+      "title": "Write tests for the sum function",
+      "intent": "Ensure sum() works correctly for basic cases, floats, and edge cases",
+      "acceptance": "All tests pass",
+      "files": ["tests/test_math.py"],
+      "writes": ["tests/test_math.py"],
+      "verify": "uv run pytest tests/test_math.py -xvs",
+      "depends_on": ["step-1"]
+    }
+  ]
+}

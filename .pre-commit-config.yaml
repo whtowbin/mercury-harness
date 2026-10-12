@@ -1,0 +1,95 @@
+# Hooks for `prek` — a faster, dependency-free, drop-in replacement for the
+# pre-commit framework that reads this same file format. Install it with
+# `uv tool install prek`, then `prek install` once per clone.
+#
+# Everything here is a Rust-based tool that runs in milliseconds, which is the
+# point: checks this cheap can run on every commit without anyone being
+# tempted to skip them, and an agent generating code at speed needs the
+# feedback loop to be faster than it is.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: complexipy
+        name: complexipy (cognitive complexity <= 25)
+        # The project's own complexipy (uv.lock), not the pre-commit mirror's
+        # pinned 5.1.0: the two score the same function differently (a 31 here
+        # was a 12 there), and this repo's numbers and check_complexity tool
+        # come from the locked one.
+        # A ceiling, not a target: 25 flags about 0.4% of this repo's 3,200
+        # functions (the default of 15 would flag 44). A function that truly
+        # needs more gets a `# complexipy: ignore` and a comment saying why,
+        # not a higher global number.
+        entry: uv run complexipy agent bench --max-complexity-allowed 25 --quiet
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ty
+        name: ty (type check)
+        # --all-extras: agent/relevance.py imports an optional package
+        # (typesafe-sdk); without it installed the import is "unresolved" and
+        # the hook fails in whichever checkout lacks the extra.
+        # Untracked files are excluded: prek stashes unstaged edits but leaves
+        # untracked files in place, so another session's new file was checked
+        # against the committed versions of the modules it imports, and failed
+        # on names that existed only in its stashed edits. Every tracked file is
+        # still checked, so a staged change that breaks a caller is still caught.
+        entry: >-
+          bash -c 'args=(); while IFS= read -r f; do args+=(--exclude "./$f"); done
+          < <(git ls-files --others --exclude-standard -- "*.py" | sed "s/[][*?{}!\\ ]/\\\\&/g");
+          exec uv run --all-extras ty check "${args[@]}"'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: hygiene-docs
+        name: DESIGN-LOG index and TUNABLES in sync
+        # --fix refreshes TUNABLES line numbers (they rot on every edit) and
+        # fails once so the change gets re-staged, like ruff --fix does.
+        entry: uv run python scripts/hygiene.py docs --fix
+        language: system
+        files: ^(DESIGN-LOG\.md|TUNABLES\.md|agent/.*\.py)$
+        pass_filenames: false
+
+      - id: hygiene-refs
+        name: living docs name only files that exist
+        entry: uv run python scripts/hygiene.py refs
+        language: system
+        files: \.md$
+        pass_filenames: false
+
+      - id: no-test-deletions
+        name: staged diff must not remove tests without adding any
+        entry: uv run python scripts/hygiene.py test-deletions
+        language: system
+        files: test_.*\.py$
+        pass_filenames: false
+
+      - id: fast-tests
+        name: pytest -n auto -m "not slow" (~10s)
+        # Pre-push, not per-commit or per-edit: batches with the developer's
+        # own edits. The full ~85s run stays a deliberate manual step.
+        entry: uv run pytest -n auto -m "not slow" -q
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+      - id: trivy-secrets
+        name: trivy (secret scan)
+        # Secrets only, not the vuln/misconfig/license scanners trivy also
+        # has — those need a network fetch of vulnerability DBs, which is
+        # both slow and the wrong shape for "runs on every commit". No
+        # account or login required, unlike the Semgrep Guardian plugin
+        # this replaces: see DESIGN-LOG.md for why that one was dropped.
+        entry: trivy fs --scanners secret --skip-dirs .venv,traces,node_modules
+          --exit-code 1 -q .
+        language: system
+        pass_filenames: false
