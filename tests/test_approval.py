@@ -540,6 +540,28 @@ def test_paths_after_cd_are_checked_from_the_cd_directory(tmp_path):
     approver.check_bash("cd tests && cat lines.txt")  # an ordinary path from there still passes
 
 
+def test_a_cd_target_with_dot_dot_through_a_symlink_is_denied(tmp_path):
+    """Python resolves the symlink before `..`, the shell applies `..` to the text first:
+    with ws/a -> ws/deep/dir, `a/../../x` is ws/x to Path.resolve() but the shell lands in
+    the workspace's parent. Checked against a real /bin/sh, then the approver."""
+    import subprocess
+
+    ws = tmp_path / "ws"
+    approver = _unattended(ws)
+    (ws / "deep" / "dir").mkdir(parents=True)
+    (ws / "x").mkdir()
+    (ws / "x" / "secret.txt").write_text("INSIDE")
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "secret.txt").write_text("OUTSIDE")
+    (ws / "a").symlink_to(ws / "deep" / "dir")
+    command = "cd a/../../x && cat secret.txt"
+    shell = subprocess.run(["/bin/sh", "-c", command], cwd=ws, capture_output=True, text=True)
+    assert shell.stdout == "OUTSIDE"  # the differential is real
+    with pytest.raises(Denied):
+        approver.check_bash(command)
+    approver.check_bash("cd x && cat secret.txt")  # a plain subdirectory still passes
+
+
 def test_a_wrapped_command_runs_through_run_bash_unattended(tmp_path):
     """The approval is only useful if run_bash then runs it: a real shell, a
     real workspace, cd into a subdirectory and the output cut."""

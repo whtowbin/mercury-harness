@@ -1,6 +1,6 @@
 # Command reference
 
-This page reflects **v0.2.0** and is generated from the commands' own definitions
+This page reflects **v0.2.1** and is generated from the commands' own definitions
 (`harness <command> --help` and `bench <command> --help`), so a flag listed here exists
 in that release. When it and `--help` disagree, `--help` is right. Long help texts are cut
 at their first sentence or two; `--help` has the rest.

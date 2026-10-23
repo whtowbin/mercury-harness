@@ -13186,6 +13186,15 @@ one pattern at a time. Benchmark runs do not depend on it (they run under `sandb
 does. Options, not taken: run unattended user runs under the same `sandbox-exec` profile iso.py uses, or shrink the
 unattended allowlist (sed only as read-only `-n ...p`, no option values attached to path commands).
 
+**Release review, 22-23 Oct (v0.2.0, v0.2.1).** Before the public push a review found that the new `cd` part followed
+an exported `CDPATH` out of the workspace (fixed in `toolchain.clean_env`; `tests/test_shell_tracking.py`), and listed
+more allowlist gaps of the fifth review's kind (redirects on non-path commands, `rg --pre`, `pytest -c`, `tree -o`, `git
+-C`; pre-existing, left for the unattended-run sandbox). After the v0.2.0 push an automated review found a parser
+differential in the `cd` check itself: `Path.resolve()` follows a symlink before `..`, the shell applies `..` to the
+text first, so with `ws/a -> ws/deep/dir`, `cd a/../../x` resolved to `ws/x` here and ran in the workspace's parent
+(confirmed with `/bin/sh`). A `cd` target with any `..` component is now refused (v0.2.1;
+`test_a_cd_target_with_dot_dot_through_a_symlink_is_denied` fails on v0.2.0). No §131 trace used `..` in a `cd`.
+
 **Preflight scout** (one repeat, to read traces for friction, not to compare): django 10 tasks with Mercury 2.5,
 Mercury 3, and Mercury 3 with `--no-expected-result-gate` (iso arms on this commit); SciCode one round of Mercury 3 at
 high and at medium executor effort. A subagent reads the traces with `harness trace` tools for new friction before

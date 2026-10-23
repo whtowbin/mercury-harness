@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-10-23)
+
+- Security: an approved `cd` in a wrapped test command may no longer contain `..`. With a symlink inside the
+  workspace, `cd a/../../x` passed the check (which resolves the link first) while the shell, which applies `..` to
+  the text first, ran it outside the workspace.
+
 ## 0.2.0 (2026-10-23)
 
 Mercury 3 support and what came out of testing it (`DESIGN-LOG.md` §131).

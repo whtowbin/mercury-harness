@@ -337,6 +337,11 @@ class Approver:
             if tokens[0] == "cd":
                 if i > 0 or len(tokens) != 2 or tokens[1].startswith("-"):
                     return False
+                # No `..` in a cd target: Path.resolve() follows a symlink before applying
+                # `..`, the shell applies `..` to the text first, so `a/../../x` with `a` a
+                # link deeper into the workspace resolves inside here and lands outside there.
+                if ".." in Path(tokens[1]).parts:
+                    return False
                 if not self._resolves_inside_workspace(root, tokens[1]):
                     return False
                 base = (root / Path(tokens[1]).expanduser()).resolve()
