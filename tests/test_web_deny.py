@@ -327,3 +327,50 @@ def test_a_broken_pdf_is_an_error_not_noise(tmp_path, local_fetch):
     ctx = make_ctx(tmp_path)
     with _Server(b"%PDF-1.4\nthis is not really a pdf") as base:
         assert fetch_url(ctx, f"{base}/broken.pdf").startswith("error: could not read the PDF")
+
+
+def test_the_drivers_lists_refuse_the_routes_mercury_3_used():
+    """DESIGN-LOG §131.5: URLs Mercury 3 fetched successfully in sealed runs, each now denied,
+    while code a solution could contain (workspace paths, Django names) still passes."""
+    import sys
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    sys.path[:0] = [str(scripts), str(scripts / "swebench"), str(scripts / "scicode")]
+    import sci  # ty: ignore[unresolved-import]
+    import swe  # ty: ignore[unresolved-import]
+
+    django = tuple(swe.WEB_DENY)
+    for url in (
+        "https://api.github.com/repos/django/django/pulls/11790/files",
+        "https://api.github.com/search/issues?q=repo:django/django+%22fast+delete%22",
+        "https://www.swebench.com/viewer.html",
+        "https://cdn.jsdelivr.net/gh/django/django@main/tests/model_fields/tests.py",
+        "https://raw.githack.com/django/django/main/django/db/models/base.py",
+        "https://github.com/SWE-bench/SWE-bench",
+        "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Lite",
+    ):
+        assert denied_by(url, django), url
+    scicode = tuple(sci.WEB_DENY)
+    for url in (
+        "https://sourcegraph.com/.api/search/stream?q=context:global+select_big_weights",
+        "https://sourcegraph.com/.api/search/stream?q=repo:^github\\.com/NVIDIA-NeMo/Gym$+file:scicode",
+        "https://huggingface.co/datasets/akshathmangudi/SciCode",
+        "https://huggingface.co/api/datasets?search=scicode",
+        "https://github.com/search?q=%22select_big_weights%22&type=code",
+        "https://www.bing.com/search?q=%22n_tangle%22+%22scicode%22",
+        "https://html.duckduckgo.com/html/?q=%22pendulum_analysis%22",
+        "https://raw.githubusercontent.com/someone/SciCode/main/eval/data/problems_all.jsonl",
+        "https://cdn.jsdelivr.net/gh/someone/SciCode@main/eval/data/problems_all.jsonl",
+    ):
+        assert denied_by(url, scicode), url
+    for code in (
+        "open('/Users/x/.cache/mercury-harness/swebench-runs/s131p-dj-r1-t3/11880/django/x.py')",
+        "open('/Users/x/.cache/mercury-harness/scicode-runs/s131-sci-h1/51/solution.py')",
+        "def scicode_example(x): return x",
+        "from django.http import HttpResponse",
+        "https://pypi.org/pypi/numpy/json",
+        "https://arxiv.org/abs/2407.13168",
+        "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js",  # packages, not repos
+    ):
+        assert not denied_by(code, scicode + django), code

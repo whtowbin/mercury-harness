@@ -18,7 +18,9 @@ on top of that pair.
 
 from __future__ import annotations
 
+import fnmatch
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -29,6 +31,23 @@ from .editcalls import CHANGE_TOOLS, EDIT_TOOLS
 Event = dict[str, Any]
 
 DEFAULT_PATTERN = "run-*.jsonl"
+
+
+def _rglob_following(root: Path, pattern: str) -> list[Path]:
+    """`root.rglob(pattern)` for files, but through symlinked directories too
+    (`Path.rglob` does not follow them, so a folder of links to trace
+    directories looked empty). Each real directory is walked once, which also
+    ends a link that points back at its own parent."""
+    found: list[Path] = []
+    seen: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in seen:
+            dirnames[:] = []
+            continue
+        seen.add(real)
+        found.extend(Path(dirpath, n) for n in filenames if fnmatch.fnmatch(n, pattern))
+    return sorted(found)
 
 
 # -- loading ------------------------------------------------------------------
@@ -677,7 +696,7 @@ def holds_in(
 ) -> list[dict[str, Any]]:
     """Every hold response across a directory's traces, each tagged with its trace."""
     trace_dir = Path(trace_dir)
-    paths = sorted(trace_dir.rglob(pattern) if recursive else trace_dir.glob(pattern))
+    paths = _rglob_following(trace_dir, pattern) if recursive else sorted(trace_dir.glob(pattern))
     rows: list[dict[str, Any]] = []
     for path in paths:
         for row in hold_responses(load_trace(path)):
@@ -795,7 +814,7 @@ def leaks_in(
     out: dict[str, list[dict[str, Any]]] = {}
     seen: set[str] = set()
     for path in sorted(
-        trace_dir.rglob(DEFAULT_PATTERN), key=lambda p: ("failed-chats" in p.parts, p)
+        _rglob_following(trace_dir, DEFAULT_PATTERN), key=lambda p: ("failed-chats" in p.parts, p)
     ):
         if path.name in seen:
             continue
@@ -1015,7 +1034,9 @@ def latency(
     ):
         query = sql.format(period=_PERIODS[by])
         used = {k: v for k, v in params.items() if f"${k}" in query}
-        rel = con.execute(query, used)
+        # DuckDB, values bound as parameters; the only formatted text is a _PERIODS entry,
+        # checked above. Semgrep's SQLAlchemy raw-query rule does not apply.
+        rel = con.execute(query, used)  # nosemgrep
         columns = [d[0] for d in rel.description]
         tables[name] = [dict(zip(columns, row, strict=True)) for row in rel.fetchall()]
     return tables

@@ -103,6 +103,15 @@ def test_cost_from_the_price_table_counts_cached_input_at_its_rate():
     assert cost == pytest.approx(0.024 + 0.0016 + 0.015)
 
 
+def test_mercury_3_is_priced_at_its_launch_rate_on_the_inception_path():
+    assert P.INCEPTION.models["inception/mercury-3"] == "mercury-3"
+    # 0.6M fresh * 0.10 + 0.4M cached * 0.01 + 0.1M out * 0.35. On OpenRouter the response's
+    # own usage.cost is used (the OpenRouter table is empty); this is the direct-API path.
+    cost = P.INCEPTION.cost("inception/mercury-3", 1_000_000, 400_000, 100_000)
+    assert cost == pytest.approx(0.06 + 0.004 + 0.035)
+    assert P.INCEPTION.cost("inception/mercury-3", 1000, 0, 1000) > 0
+
+
 def test_an_unpriced_model_costs_nothing_rather_than_guessing():
     assert P.INCEPTION.cost("some/other-model", 1000, 0, 1000) == 0.0
 

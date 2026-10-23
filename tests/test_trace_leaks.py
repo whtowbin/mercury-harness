@@ -138,3 +138,24 @@ def test_a_search_result_on_the_deny_list_is_counted_as_seen():
     ]
     hits = T.web_hits(events, DENY)
     assert [(h["tool"], h["target"], h["shown"]) for h in hits] == [("web_search result", DEV, 31)]
+
+
+def test_a_folder_of_symlinks_to_trace_directories_finds_the_same_runs(tmp_path):
+    """`Path.rglob` does not follow symlinked directories, so a folder of links
+    to run directories used to report no fetches (DESIGN-LOG §131.19)."""
+    real = tmp_path / "real"
+    _write(real / "r1" / "run-a.jsonl", fetch(DEV, chars=10))
+    _write(real / "r2" / "run-b.jsonl", fetch(DEV))
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "one").symlink_to(real / "r1", target_is_directory=True)
+    (links / "two").symlink_to(real / "r2", target_is_directory=True)
+    assert set(T.leaks_in(real, DENY)) == {"r1/run-a.jsonl", "r2/run-b.jsonl"}
+    assert set(T.leaks_in(links, DENY)) == {"one/run-a.jsonl", "two/run-b.jsonl"}
+    assert len(T.holds_in(links, recursive=True)) == len(T.holds_in(real, recursive=True))
+
+
+def test_a_symlink_to_its_own_parent_does_not_loop(tmp_path):
+    _write(tmp_path / "d" / "run-a.jsonl", fetch(DEV, chars=10))
+    (tmp_path / "d" / "up").symlink_to(tmp_path, target_is_directory=True)
+    assert list(T.leaks_in(tmp_path, DENY)) == ["d/run-a.jsonl"]

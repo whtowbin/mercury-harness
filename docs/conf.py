@@ -18,7 +18,7 @@ try:
 
     release = _pkg_version("mercury-harness")
 except Exception:
-    release = "0.1.0"
+    release = "0.2.0"
 version = release
 
 extensions = [

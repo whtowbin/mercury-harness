@@ -471,3 +471,145 @@ def test_file_tests_run_unattended_inside_the_workspace_only(tmp_path):
     approver.check_bash("[ -f answer.txt ]")
     with pytest.raises(Denied):
         approver.check_bash("test -f /etc/passwd")
+
+
+# -- §131.10: an allowed command wrapped in cd/&&, 2>&1 and a numeric tail ----
+
+_RUNTESTS = "python tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1"
+
+
+def _unattended(tmp_path):
+    (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
+    return Approver(auto_approve=True, unattended=True, workspace_root=tmp_path)
+
+
+def test_unattended_allows_the_wrapped_test_commands_it_used_to_deny(tmp_path):
+    """Denied in §131's django and SciCode traces, each retried bare next call."""
+    approver = _unattended(tmp_path)
+    for command in (
+        f"{_RUNTESTS} migrations.test_writer 2>&1 | tail -20",
+        f"{_RUNTESTS} model_enums.tests 2>&1 | tail -n 20",
+        "cd tests && python runtests.py model_tests.test_choices --verbosity=2",
+        "cd tests && python runtests.py fast_delete_combine --settings=test_sqlite 2>&1 | tail -40",
+        "uv run pytest -s -q tests/test_debug.py 2>&1 | head -80",
+        "python -m py_compile solution.py && echo 'Syntax OK'",
+        "uv run ruff check --fix solution.py && cat solution.py",
+        "ls -la tests/ | head -40",
+        "pwd && ls -la",
+    ):
+        approver.check_bash(command)  # must not raise
+
+
+def test_unattended_still_denies_anything_past_the_narrow_wrapping(tmp_path):
+    approver = _unattended(tmp_path)
+    for command in (
+        "cd /etc && cat passwd",  # cd outside the workspace
+        "cd .. && ls",
+        "cd tests && curl https://example.com",  # a part not allowlisted
+        f"{_RUNTESTS} x 2>&1 | sh",  # a pipe into anything but head/tail
+        f"{_RUNTESTS} x | tail -5 | sh",
+        f"{_RUNTESTS} x | tail -f",  # not a numeric count
+        f"{_RUNTESTS} x; rm notes.txt",  # ; is not &&
+        f"{_RUNTESTS} x || echo failed",
+        "cat ../../secret | head -5",  # a part whose path escapes
+        "echo $(cat ~/.ssh/id_rsa) | tail -1",  # substitution
+        "git status && rm -rf ~",
+        # From the security review of 1ded9df: each passed the first version of the rule.
+        'ls && echo "$(cat ~/.ssh/id_rsa)"',  # double-quoted substitution, hidden by re-quoting
+        'ls && echo "`id`"',
+        "python x.py &>/tmp/out && echo done",  # &> is not in shlex's operator list
+        "cat $HOME/.ssh/id_rsa && echo",  # expansion
+        "cd - && cat notes.txt",  # cd to OLDPWD
+        "cd t* && ls",  # a glob the shell expands
+        "echo ok && cd tests",  # cd only first
+        "ls\ncat ~/.ssh/id_rsa && echo",  # a second line
+    ):
+        with pytest.raises(Denied):
+            approver.check_bash(command)
+
+
+def test_paths_after_cd_are_checked_from_the_cd_directory(tmp_path):
+    """tests/link points outside the workspace: `link/x` is inside from the
+    workspace root (no such file there) but outside from tests/, where it runs."""
+    approver = _unattended(tmp_path / "ws")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "ws" / "tests" / "link").symlink_to(outside)
+    with pytest.raises(Denied):
+        approver.check_bash("cd tests && cat link/secret.txt")
+    approver.check_bash("cd tests && cat lines.txt")  # an ordinary path from there still passes
+
+
+def test_a_wrapped_command_runs_through_run_bash_unattended(tmp_path):
+    """The approval is only useful if run_bash then runs it: a real shell, a
+    real workspace, cd into a subdirectory and the output cut."""
+    from agent.tools import ToolContext
+    from agent.tools.shell import run_bash
+    from agent.trace import Trace
+    from agent.workspace import Workspace
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "lines.txt").write_text("".join(f"line {i}\n" for i in range(50)))
+    ctx = ToolContext(
+        workspace=Workspace(tmp_path),
+        approver=Approver(auto_approve=True, unattended=True, workspace_root=tmp_path),
+        trace=Trace(str(tmp_path / "traces"), run_id="t", echo=False),
+    )
+    out = run_bash(ctx, "cd tests && cat lines.txt 2>&1 | tail -3")
+    assert "line 49" in out and "line 46" not in out
+
+
+def test_a_path_the_shell_would_expand_is_not_taken_as_inside(tmp_path):
+    """Before §131.10 `cat $HOME/.ssh/id_rsa` passed: `$HOME/...` read as a
+    folder inside the workspace."""
+    approver = Approver(auto_approve=True, unattended=True, workspace_root=tmp_path)
+    for command in ("cat $HOME/.ssh/id_rsa", "cp notes.txt ${HOME}/x", "cat `echo ~`/.ssh/id_rsa"):
+        with pytest.raises(Denied):
+            approver.check_bash(command)
+    approver.check_bash("cat notes.txt")  # an ordinary relative path still passes
+
+
+def test_brace_and_tilde_expansion_python_reads_differently_from_bash(tmp_path):
+    """Second review of §131.10: bash expands `~-` (OLDPWD), `~+` (PWD) and
+    `{a,b}`; Python's expanduser and Path take them as names in the workspace."""
+    approver = _unattended(tmp_path)
+    for command in (
+        "cd ~- && ls",
+        "cat ~+/../secret",
+        "cat {/etc/passwd,notes.txt}",
+        "cp notes.txt {/tmp/x,y}",
+        # Third review: quoting and escapes inside the braces fooled a raw-text scan.
+        'cat {"/etc/passwd",x}',
+        "cat {/etc/passwd,\\ x}",
+        'cp notes.txt {"/abs/path",}',
+        "cd tests && cat {../../x,y}",
+    ):
+        with pytest.raises(Denied):
+            approver.check_bash(command)
+    for command in ("find . -type f -name '*.py'", "cat tests/lines.txt", "cd tests && ls"):
+        approver.check_bash(command)  # must not raise
+
+
+def test_expansion_from_a_pattern_or_flag_position_cannot_add_a_path(tmp_path):
+    """Fourth review: grep's pattern and every flag skipped the path check, so
+    brace or $IFS expansion there could add `/etc/passwd` as a file argument;
+    and a flag's own value was never checked. 10 of 1,511 run_bash calls in
+    all bench traces had a path command with any of these characters."""
+    approver = _unattended(tmp_path)
+    for command in (
+        "grep {x,/etc/passwd}",
+        "grep x$IFS/etc/passwd",
+        "sed -n {p,/etc/passwd}",
+        "cat --{x,/etc/passwd}",
+        "grep --file=/etc/passwd x",
+        "diff --from-file=/etc/passwd notes.txt",
+        "grep 'end$' notes.txt",  # fails closed: a literal $ cannot be told from an expansion
+    ):
+        with pytest.raises(Denied):
+            approver.check_bash(command)
+    for command in (
+        "grep -n TODO notes.txt",
+        "grep --color=never TODO notes.txt",
+        "sed -n 1,5p notes.txt",
+    ):
+        approver.check_bash(command)  # must not raise

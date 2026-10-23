@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0 (2026-10-23)
+
+Mercury 3 support and what came out of testing it (`DESIGN-LOG.md` §131).
+
+- **Mercury 3**: model id `inception/mercury-3` with its OpenRouter prices ($0.10 input, $0.01
+  cached input, $0.35 output per million tokens, the launch discount), and benchmark configs for it
+  (`mercury3-only`, the isolated arm `h-m3`).
+- **`expected_result_gate` now defaults to False.** With it off, Mercury 3 had 0.194 more perfect
+  runs on the fixtures (§131.9).
+- **Runaway reasoning step-down is on by default**: a call at medium or high effort that is cut
+  for no content, or ends at the token cap with only reasoning, is asked again at low effort
+  (§131.12).
+- **Wrapped test commands are approved**: `cd tests && ...` and `... 2>&1 | tail -N`
+  are approved unattended when every part would pass alone. Restrictions: only `&&` joins parts, `cd`
+  comes first and must stay in the workspace, at most `2>&1` and one final `| head` or `| tail`
+  with a numeric count, and no substitution, redirect, glob or other shell syntax (§131.10).
+- **`CDPATH` is dropped from the environment shell commands run with**, so an approved `cd tests`
+  cannot land in another directory.
+- **`harness trace leaks` and `harness trace holds`** follow symlinked trace folders.
+- **Scripts**: new `scripts/long_output_probe.py` (one long page from one call, graded under the
+  benchmark agents' sandbox profile) and `scripts/webdeny.py` (web deny lists); `temperature_probe.py`
+  takes a model argument.
+- **Records**: `DESIGN-LOG.md` §131.
+
 ## 0.1.0 (2026-10-11)
 
 The first public release. Research code: a coding-agent harness built around Mercury 2.5, a

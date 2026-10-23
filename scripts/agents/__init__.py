@@ -36,6 +36,7 @@ PROXY_VARS = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PRO
 # agrees with it to the cent. None: no cached price known, so cached input is priced as input.
 PRICES = {
     "mercury-2.5": (0.04, 0.004, 0.15),
+    "mercury-3": (0.10, 0.01, 0.35),  # launch price, 19 Oct 2026; list is 0.20 / 0.02 / 0.70
     "glm-5.3-flash": (0.15, None, 0.50),
     "claude-haiku-4.5": (1.00, None, 5.00),
 }

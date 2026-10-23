@@ -25,6 +25,9 @@ def test_price_uses_openrouter_list_prices():
     # No known cached price: cached input is priced as input, never below it.
     assert agents.price("z-ai/glm-5.3-flash", 2_000_000, 0, 1_000_000) == pytest.approx(0.30)
     assert agents.price("inception/mercury-2.5", 100, 0, 500) == pytest.approx(100 * 0.004 / 1e6)
+    assert agents.price("openrouter/inception/mercury-3", 1_000_000, 1_000_000) == pytest.approx(
+        0.45
+    )
     with pytest.raises(KeyError):
         agents.price("some/unknown-model", 1, 1)
 
@@ -297,3 +300,25 @@ def test_the_sandbox_denies_the_home_folder_and_allows_the_run_against_real_sand
     shown = run(["/usr/bin/env"]).stdout
     assert "OPENROUTER_API_KEY=or-key" in shown and "BRAVE_API_KEY" not in shown
     assert f"UV_TOOL_DIR={out / 'uv-tools'}" in shown  # uvx's own folder, inside the run's output
+
+
+def test_mini_writes_a_price_registry_only_for_models_its_litellm_cannot_cost(tmp_path):
+    """mini refuses a model litellm 1.104.0 has no price for (Mercury 3); the registry
+    carries agents.PRICES into the sandboxed run, and a mapped model gets none."""
+    import json
+
+    out = tmp_path / "out"
+    args = mini.argv("goal", tmp_path / "ws", out, "openrouter/inception/mercury-3", "high")
+    reg = out / "litellm_registry.json"
+    assert f"model.litellm_model_registry={reg}" in args
+    entry = json.loads(reg.read_text())["openrouter/inception/mercury-3"]
+    assert entry["output_cost_per_token"] == 0.35 / 1e6
+    assert "litellm==1.104.0" in args
+    other = mini.argv(
+        "goal", tmp_path / "ws", tmp_path / "o2", "openrouter/inception/mercury-2.5", "high"
+    )
+    assert any("litellm_model_registry" in a for a in other)
+    glm = mini.argv(
+        "goal", tmp_path / "ws", tmp_path / "o3", "openrouter/z-ai/glm-5.3-flash", "high"
+    )
+    assert not any("litellm_model_registry" in a for a in glm)

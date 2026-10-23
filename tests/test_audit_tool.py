@@ -196,3 +196,18 @@ def test_genuinely_unreadable_trace_file_reports_instead_of_crashing(ctx, monkey
     result = audit_previous_runs(ctx)
     assert "a working prior run" in result
     assert "could not read trace" in result
+
+
+def test_offered_only_with_memory_on_even_beside_earlier_traces(ctx, tmp_path):
+    """Earlier traces are cross-run state: bench runs (memory off) share one
+    trace directory, and a run must not read the other arm's runs."""
+    from agent.memory import MemoryStore
+    from agent.runner import _without_unavailable
+    from agent.tools.audit import AUDIT_TOOLS
+    from agent.tools.base import Registry
+
+    _write_prior_trace(ctx.trace.path.parent, "prior1", "fix the scoring bug")
+    registry = Registry(AUDIT_TOOLS)
+    assert "audit_previous_runs" not in _without_unavailable(registry, ctx).names()
+    ctx.memory = MemoryStore(tmp_path)
+    assert "audit_previous_runs" in _without_unavailable(registry, ctx).names()

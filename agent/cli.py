@@ -233,6 +233,21 @@ def run_command(
     verify_steps: Annotated[
         bool, typer.Option(help="Run each step's verify command after it finishes.")
     ] = True,
+    runaway_step_down: Annotated[
+        bool,
+        typer.Option(
+            help="Ask a Mercury call again at low effort when it is cut for no content or ends "
+            "at the token cap having only reasoned (on by default since DESIGN-LOG §131.12)."
+        ),
+    ] = True,
+    expected_result_gate: Annotated[
+        bool,
+        typer.Option(
+            help="Retry a step reported verified with no expected_result (§27's gate; off by "
+            "default since DESIGN-LOG §131.9, which records the gap and lets the step's verify "
+            "command decide)."
+        ),
+    ] = False,
     escalate: Annotated[
         bool,
         typer.Option(
@@ -911,6 +926,8 @@ def run_command(
         show_stats=False if tui else stats,
         step_concurrency=step_concurrency,
         verify_steps=verify_steps,
+        expected_result_gate=expected_result_gate,
+        runaway_effort_step_down=runaway_step_down,
         escalate_on_failure=escalate,
         cache_prompts=cache,
         allow_nested=allow_nested,

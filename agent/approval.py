@@ -73,6 +73,17 @@ from .interact import HUMAN_LOCK
 # now.
 _SEPARATORS = re.compile(r"&&|\|\||[;|&]")
 _SUBSTITUTIONS = re.compile(r"[`]|\$\(")
+# What Approver._wrapped_parts_pass removes before checking the parts: a stderr
+# merge, and one final output cut with a numeric count (`| tail`, `| head -40`,
+# `| tail -n 20`). Nothing else is removed, so nothing else can hide.
+_STDERR_MERGE = re.compile(r"(?<=\s)2>&1(?=\s|$)")
+_OUTPUT_CUT = re.compile(r"\s*\|\s*(?:head|tail)(?:\s+(?:-n\s*)?-?\d+)?\s*$")
+# A path token whose meaning the shell decides at run time (Approver._resolves_inside_workspace).
+_UNPLACEABLE = re.compile(r"[$`{}]|(?:^|[=:])~(?!/|$)")
+# Shell syntax a wrapped part may not contain once 2>&1 and the output cut are
+# removed: substitution, expansion, redirection, other operators, grouping,
+# escapes, globs, a second line.
+_RAW_SHELL_SYNTAX = re.compile(r"[`$<>;|&(){}\\*?\[\]\n]")
 
 
 def _strip_quoted(command: str, keep_double: bool) -> str:
@@ -273,6 +284,8 @@ class Approver:
 
         head = command.strip().split()[0] if command.strip() else ""
         compound = is_compound(command)
+        if compound and self._wrapped_parts_pass(command):
+            return
         escaping = None
         # A compound command is not made safe by an allowlisted first word —
         # only an explicit, whole-command approval (or interactive
@@ -290,7 +303,51 @@ class Approver:
             reason = f"would touch {escaping!r}, outside the workspace"
         self._gate(command, f"run:\n    $ {command}", reason, bash=True)
 
-    def _escaping_path(self, head: str, command: str) -> str | None:
+    def _wrapped_parts_pass(self, command: str) -> bool:
+        """Whether a compound `command` is only plain commands that would each
+        pass alone, joined by `&&`, with at most `2>&1` and one trailing
+        `| head` or `| tail` with a numeric count; `cd` may come first if it
+        stays inside the workspace, and later parts' paths are then checked
+        from there.
+
+        Unattended runs denied all of these, and each denial cost a round trip
+        to the same command unwrapped: 20 of 21 denials in Mercury 3's django
+        runs, 9 for Mercury 2.5, mostly `runtests.py ... 2>&1 | tail -40` and
+        `cd tests && python runtests.py ...` (DESIGN-LOG §131.10).
+
+        The parts checked are the raw text that runs, split on `&&`, not a
+        re-quoted copy: a re-quoted part hides a `$(...)` that was in double
+        quotes, and an operator shlex does not list (`&>`). Any part with shell
+        syntax beyond plain words and quotes is refused outright.
+        """
+        root = self._workspace_root
+        if root is None:
+            return False
+        inner = _OUTPUT_CUT.sub("", _STDERR_MERGE.sub(" ", command))
+        base = root
+        for i, part in enumerate(inner.split("&&")):
+            if _RAW_SHELL_SYNTAX.search(part):
+                return False
+            try:
+                tokens = shlex.split(part)
+            except ValueError:
+                return False
+            if not tokens:
+                return False
+            if tokens[0] == "cd":
+                if i > 0 or len(tokens) != 2 or tokens[1].startswith("-"):
+                    return False
+                if not self._resolves_inside_workspace(root, tokens[1]):
+                    return False
+                base = (root / Path(tokens[1]).expanduser()).resolve()
+                continue
+            if tokens[0] not in BASH_ALLOWLIST:
+                return False
+            if self._escaping_path(tokens[0], part, base) is not None:
+                return False
+        return True
+
+    def _escaping_path(self, head: str, command: str, base: Path | None = None) -> str | None:
         """None if `head`'s command has no arguments this can confidently
         classify as a path, or every one resolves inside the workspace.
         Otherwise the first escaping argument found, for the denial message.
@@ -304,13 +361,36 @@ class Approver:
         candidates = _classify_path_args(head, tokens)
         if candidates is None:
             return command
+        if head in _PATH_ARG_COMMANDS or head in _SCRIPT_FIRST_COMMANDS:
+            # Any argument the shell would expand, not only the ones classified
+            # as paths: `grep {x,/etc/passwd}` and `grep x$IFS/etc/passwd`
+            # become `grep x /etc/passwd` from the pattern position (§131.10).
+            for token in tokens:
+                if _UNPLACEABLE.search(token):
+                    return token
+            # A flag's own value can be a path: `grep --file=/etc/passwd x`.
+            candidates = candidates + [
+                t.split("=", 1)[1] for t in tokens if t.startswith("-") and "=" in t
+            ]
         root = self._workspace_root  # narrowed non-None by the check above
         for token in candidates:
-            if not self._resolves_inside_workspace(root, token):
+            if not self._resolves_inside_workspace(root, token, base):
                 return token
         return None
 
-    def _resolves_inside_workspace(self, root: Path, token: str) -> bool:
+    def _resolves_inside_workspace(self, root: Path, token: str, base: Path | None = None) -> bool:
+        """Whether `token`, as a path relative to `base` (default `root`, the
+        workspace; a directory a leading `cd` moved to), lands inside `root`.
+        A token the shell would expand cannot be placed without running it, so
+        it does not count as inside (§131.10): `$HOME/...`, backticks, braces
+        (`{/etc/passwd,x}`), and `~` other than `~` or `~/` (bash reads `~-`
+        as OLDPWD and `~+` as PWD; Python's expanduser leaves them as names).
+        Checked on the shlex token, which has had quotes and backslashes
+        applied as bash applies them; a scan of the raw text was fooled by
+        `{"/etc/passwd",x}`. Fails closed on a literal brace or a quoted
+        tilde, which no §131 trace used."""
+        if _UNPLACEABLE.search(token):
+            return False
         try:
             # expanduser() on the token itself, before joining: a real shell
             # expands a leading ~ in its own argument regardless of where it
@@ -320,7 +400,9 @@ class Approver:
             # joining an absolute (or ~-expanded) token onto root at all is
             # what a real `cp`/`sed`/etc. would do with it too.
             expanded = Path(token).expanduser()
-            candidate = (expanded if expanded.is_absolute() else root / expanded).resolve()
+            candidate = (
+                expanded if expanded.is_absolute() else (base or root) / expanded
+            ).resolve()
         except (OSError, RuntimeError, ValueError):
             return False
         return candidate == root or root in candidate.parents

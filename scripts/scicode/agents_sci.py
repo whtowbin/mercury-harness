@@ -2,6 +2,7 @@
 
   python3 sci.py setup ROUND dev
   AGENT=mini [AGENT_MODEL=...] python3 agents_sci.py run ROUND [PID ...]
+  ARM=mini-m3 python3 agents_sci.py run ROUND [PID ...]   # mini on Mercury 3 (ARM sets both)
   python3 sci.py score ROUND > ROUND.out          # solved and sub-steps, by SciCode's scorer
   AGENT=mini python3 agents_sci.py stats ROUND     # the agent's calls and cost per problem
 
@@ -25,8 +26,13 @@ import runlimits  # noqa: E402
 from agents import api_key, load, sandboxed  # noqa: E402
 from sci import PARALLEL, RUNS  # noqa: E402
 
-AGENT = os.environ.get("AGENT", "mini")
-MODEL = os.environ.get("AGENT_MODEL", "openrouter/inception/mercury-2.5")
+MERCURY = "openrouter/inception/mercury-2.5"
+MERCURY3 = "openrouter/inception/mercury-3"
+# ARM names the same arms as iso_agents.AGENT_ARMS: (agent, model); AGENT, AGENT_MODEL override.
+ARMS = {"mini": ("mini", MERCURY), "mini-m3": ("mini", MERCURY3)}
+_ARM = ARMS[os.environ["ARM"]] if os.environ.get("ARM") else ("mini", MERCURY)
+AGENT = os.environ.get("AGENT", _ARM[0])
+MODEL = os.environ.get("AGENT_MODEL", _ARM[1])
 REASONING = os.environ.get("AGENT_REASONING", "high")
 TIMEOUT_S = runlimits.env_seconds("AGENT_TIMEOUT_S", 900)
 

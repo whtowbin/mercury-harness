@@ -1041,3 +1041,41 @@ def test_a_missing_extra_says_how_to_install_it(monkeypatch, tmp_path):
     result = runner.invoke(app, ["trace", "sql", str(tmp_path), "select 1"])
     assert result.exit_code == 2
     assert "mercury-harness[analysis]" in flat(result.output)
+
+
+def test_no_expected_result_gate_reaches_settings(monkeypatch, tmp_path):
+    """§131.9: the sealed benchmark arms set it from the command line."""
+    from agent import cli as cli_module
+
+    seen = []
+
+    def fake_run_agent(settings, plan_path, stop_after, **_kwargs):
+        seen.append(settings.expected_result_gate)
+        return {"suggested_next_step": "", "totals": {"by_model": {}}, "trace_path": "t"}
+
+    monkeypatch.setattr(cli_module, "run_agent", fake_run_agent)
+    for flags, want in (([], False), (["--expected-result-gate"], True)):
+        result = CliRunner().invoke(
+            app, ["run", "goal", "-w", str(tmp_path), "-y", "--no-memory", "--no-animate", *flags]
+        )
+        assert result.exit_code == 0, result.output
+        assert seen[-1] is want
+
+
+def test_runaway_step_down_reaches_settings(monkeypatch, tmp_path):
+    """§131.12: sealed arms set it from the command line."""
+    from agent import cli as cli_module
+
+    seen = []
+
+    def fake_run_agent(settings, plan_path, stop_after, **_kwargs):
+        seen.append(settings.runaway_effort_step_down)
+        return {"suggested_next_step": "", "totals": {"by_model": {}}, "trace_path": "t"}
+
+    monkeypatch.setattr(cli_module, "run_agent", fake_run_agent)
+    for flags, want in (([], True), (["--no-runaway-step-down"], False)):
+        result = CliRunner().invoke(
+            app, ["run", "goal", "-w", str(tmp_path), "-y", "--no-memory", "--no-animate", *flags]
+        )
+        assert result.exit_code == 0, result.output
+        assert seen[-1] is want

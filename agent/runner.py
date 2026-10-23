@@ -214,11 +214,16 @@ def _without_unavailable(registry: Registry, ctx: ToolContext) -> Registry:
     drops ask_user when the run cannot ask anyone (336 tokens a call) and
     audit_previous_runs when no earlier run's trace sits beside this one
     (376 tokens a call, DESIGN-LOG §129).
+
+    audit_previous_runs also goes with memory off: earlier traces are
+    cross-run state like memory. Bench runs share one trace directory, so a
+    run could read the other arm's runs on its own task (a Mercury 3 scout run
+    read mercury-only's failed SAVE10 runs before passing it).
     """
     names = set(registry.names())
     drop: set[str] = set()
     if ctx.memory is None:
-        drop |= _MEMORY_TOOLS
+        drop |= _MEMORY_TOOLS | {"audit_previous_runs"}
     if not ctx.interactor.enabled:
         drop.add("ask_user")
     if "audit_previous_runs" in names and not audit.previous_trace_files(ctx, 1, ""):

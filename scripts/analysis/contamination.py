@@ -36,10 +36,15 @@ DATA = Path(os.environ.get("SWE_DATA", REPO / "traces" / "swebench-data"))
 RESULTS = REPO / "results" / "s94-harness-compare.txt"
 RUNS = ROOT / "swebench-runs"
 ARMS = (
-    "mini-haiku", "mini-glm", "mini", "aider-glm", "aider", "goose", "codex",
+    "mini-haiku", "mini-glm", "mini-m3", "mini", "aider-glm", "aider", "goose", "codex",
     "glm-only", "glm-plan", "mercury-only",
     # §120's isolated rounds (scripts/swebench/iso.py), longest names first.
     "rel-no-cae", "rel-no-tail", "rel-no-rpc", "rel", "sep30", "fix",
+    # scripts/swebench/iso_s126.py's arms (§126-§131). Missing until §131, so §126's harness arms
+    # were never read here; tests/test_contamination.py keeps this in step with that file.
+    "h", "h-nr", "h-glm", "h-idle", "h-m3", "p-def", "p-sym", "h-new", "h-direct", "h-d2",
+    "h-dsym", "h-tc", "h-s55", "sonnet-plan", "sonnet5-plan", "h-sonnet", "h-haiku",
+    "t2", "t3", "t3-nog", "n3", "n3-sd", "f2", "f3", "f3-low", "f-haiku55", "f-luna",
 )  # fmt: skip
 
 ROUTES = {
@@ -48,6 +53,12 @@ ROUTES = {
         r"git\s+(?:-C\s+\S+\s+)?(?:log\b[^|;&]*(?:--all|-S|-G|--grep|\.\.|\s[0-9a-f]{7,})"
         r"|show\s+[0-9a-f]{7,}|rev-list|reflog|cherry-pick|branch\s+-a|checkout\s+[0-9a-f]{7,}"
         r"|diff\s+[0-9a-f]{7,}|fetch|log\s+[^|;&]*origin)"
+    ),
+    # Network: mini's shell is unconfined (iso_agents.py), so a fetch of the fix is possible.
+    "web": re.compile(
+        r"\b(?:curl|wget)\b|urllib|requests\.(?:get|post)|\bhttpx\b|git\s+(?:clone|fetch|pull)\b"
+        r"|(?:api\.)?github\.com|githubusercontent|djangoproject|huggingface|sourcegraph|grep\.app",
+        re.I,
     ),
     "harness files": re.compile(r"scripts/swebench|harness-[0-9a-f]{7}/|results/s94"),
 }
@@ -113,7 +124,7 @@ class Run:
 
 
 def split_dir(name: str) -> tuple[str, str] | None:
-    for arm in ARMS:
+    for arm in sorted(ARMS, key=len, reverse=True):  # `h-glm` before `h`
         if name.endswith("-" + arm):
             return name[: -len(arm) - 1], arm
     return None
@@ -125,6 +136,11 @@ def external_runs() -> list[Run]:
         parts = split_dir(p.parent.parent.name)
         if parts:
             runs.append(Run(*parts, p.name.split(".")[0], "mini", list(mini_rows(p))))
+    # iso_agents.py (§126): <round>-<arm>/out/<task>/traj.json; `<task>.abandoned-*` is skipped.
+    for p in sorted(RUNS.glob("*/out/*/traj.json")):
+        parts = split_dir(p.parents[2].name)
+        if parts and parts[1].startswith("mini") and p.parent.name.isdigit():
+            runs.append(Run(*parts, p.parent.name, "mini", list(mini_rows(p))))
     for p in sorted(RUNS.glob("*-codex/out/*/stdout.log")):
         parts = split_dir(p.parents[2].name)
         if parts:

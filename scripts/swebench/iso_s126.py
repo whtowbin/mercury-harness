@@ -21,6 +21,31 @@ iso.ARMS["h"] = (SHA, [])
 iso.ARMS["h-nr"] = (SHA, ["--no-review"])
 iso.ARMS["h-glm"] = (SHA, GLM_FLAGS)
 iso.ARMS["h-idle"] = (SHA, ["--stop-after-idle-fix-round"])
+# §131: Mercury 3 (released 2026-10-19) on `h`'s tree, so the model is the only difference from
+# §126's numbers. --all-mercury stays and copies the executor into every phase.
+M3 = "inception/mercury-3"
+iso.ARMS["h-m3"] = (SHA, ["--executor", M3])
+# §131.10: today's tree with §131.9-131.10's fixes (review off by default since §124.10), the
+# preflight before the full run: Mercury 2.5, Mercury 3, and Mercury 3 with the gate off.
+TODAY = "1ded9df"
+iso.ARMS["t2"] = (TODAY, [])
+iso.ARMS["t3"] = (TODAY, ["--executor", M3])
+iso.ARMS["t3-nog"] = (TODAY, ["--executor", M3, "--no-expected-result-gate"])
+# §131.12: the low-effort step-down A/B, on the tree that has it (gate off by default there).
+STEP_TREE = "c39cea0"
+iso.ARMS["n3"] = (STEP_TREE, ["--executor", M3])
+iso.ARMS["n3-sd"] = (STEP_TREE, ["--executor", M3, "--runaway-step-down"])
+# §131.13: the full run, on the tree with §131.9 and §131.12's defaults (gate off, step-down on).
+FULL_TREE = "17bf856"
+iso.ARMS["f2"] = (FULL_TREE, [])
+iso.ARMS["f3"] = (FULL_TREE, ["--executor", M3])
+# §131.16: Inception's comparison models, same tree, in every phase (--all-mercury copies the
+# executor into every phase, whatever the model).
+iso.ARMS["f-haiku55"] = (FULL_TREE, ["--executor", "anthropic/claude-haiku-5.5"])
+iso.ARMS["f-luna"] = (FULL_TREE, ["--executor", "openai/gpt-6-luna"])
+# §131.18: Mercury 3 at low effort in planning and execution, against f3 (high) on the same tree.
+LOW = ["--executor-reasoning", "low", "--planner-reasoning", "low"]
+iso.ARMS["f3-low"] = (FULL_TREE, ["--executor", M3, *LOW])
 # Plan-only arms for §128: Mercury plans, nothing is executed or scored.
 # Both arms run the same newer tree (84f3e19, which has --issue-symbols), so only the flag differs.
 PLAN_TREE = "84f3e19"

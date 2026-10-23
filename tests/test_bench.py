@@ -228,6 +228,15 @@ def test_the_baseline_uses_one_model_everywhere():
     assert len(baseline.models) == 1
 
 
+def test_mercury3_only_differs_from_mercury_only_in_the_three_models():
+    from dataclasses import asdict
+
+    old, new = asdict(configs.get("mercury-only")), asdict(configs.get("mercury3-only"))
+    changed = {k for k in old if old[k] != new[k]}
+    assert changed == {"name", "planner", "executor", "reviewer", "group", "description"}
+    assert {new["planner"], new["executor"], new["reviewer"]} == {"inception/mercury-3"}
+
+
 # -- reporting ------------------------------------------------------------
 
 
@@ -1123,6 +1132,7 @@ def test_every_sweepable_setting_has_a_config_that_turns_it_off():
         "final_check",
         "skills",
         "verify_steps",
+        "runaway_effort_step_down",
     ):
         assert any(getattr(c, knob) is False for c in active), f"nothing prices {knob}"
     for limit in ("mercury_max_tokens", "mercury_content_stall_s"):

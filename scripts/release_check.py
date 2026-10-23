@@ -92,6 +92,10 @@ LEFT_OUT = (
     "scripts/build_posts_page.template.html",
     "scripts/blog_export.py",
     "scripts/analysis/post1_new_figures.py",
+    "scripts/analysis/post3_figures.py",
+    "scripts/medium_tables.py",
+    "scripts/docs_tui_screenshots.py",
+    "tests/test_blog_export.py",
 )
 
 # What ships as a GitHub release asset, not in the exported tree (decided 10 Oct): the per-run

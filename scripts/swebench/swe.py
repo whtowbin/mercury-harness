@@ -16,6 +16,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runlimits  # noqa: E402  scripts/runlimits.py, the run time limit (DESIGN-LOG §96.2)
+from webdeny import GITHUB_MIRRORS, SEARCH_DENY  # noqa: E402
 
 # Each harness run's wall limit: about 1.5x the slowest django run on record (18.5 min, §107).
 RUN_TIMEOUT_S = runlimits.env_seconds("SWE_RUN_TIMEOUT_S", 1500)
@@ -35,8 +36,16 @@ WEB_DENY = [
     "githubusercontent.com/django/django",
     "djangoproject.com",
     "swe-bench",
-    "swebench",
+    # Not a bare "swebench": deny patterns are also matched against code a run executes, and every
+    # workspace path holds "swebench-runs" (§131.11: a run_python naming its own file was refused).
+    "swebench.com",
+    "swebench/",
     "princeton-nlp",
+    "repos/django/django",  # GitHub's API form, which "github.com/django/django" misses (§131.5)
+    # Any address naming the repository: jsDelivr's gh/django/django@main reached main (§131.13).
+    "django/django",
+    *GITHUB_MIRRORS,
+    *SEARCH_DENY,
 ]
 TEST_COMMAND = (
     "python tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 {targets}"

@@ -283,6 +283,12 @@ class Settings:
     show_stats: bool = True
     # After a step, run its `verify` command and hand any failure back for a retry.
     verify_steps: bool = True
+    # A finish_step with verified=true and no expected_result: False (default since §131.9) records
+    # the gap and lets the step's verify command decide, as the prompt and the schema say; True is
+    # §27's gate, which retried the whole attempt and skipped the verify. Mercury 3 omits the field
+    # in 9 of 10 verified calls; gate off: perfect runs +0.194 [+0.032, +0.355], calls -2.3, and no
+    # change for Mercury 2.5 (results/s131d-er.jsonl).
+    expected_result_gate: bool = False
     # The deterministic gate after review: re-run every step's verify command
     # against the finished code, run the test suite, and type-check the
     # changed files — no model calls at all. Failures become blocker findings
@@ -424,6 +430,11 @@ class Settings:
     # and retry it. 30 s since §95.1 (the author's decision on the scout); it also catches
     # provider stalls that are not runaways, which the cap cannot. None: off.
     mercury_content_stall_s: float | None = 30.0
+    # A Mercury call at medium or high effort that is cut for no content, or ends at the token cap
+    # having only reasoned, is asked again at low effort instead of repeated (DESIGN-LOG §131.12).
+    # On since its A/B: Mercury 3 on SciCode, first-content cuts 82 -> 35 over three rounds,
+    # problems 9.0 -> 9.7 a round, wall time a round about -30%.
+    runaway_effort_step_down: bool = True
     # A command that answers the run's questions instead of a person: each question
     # goes to its stdin as JSON ({"question", "options", "recommended"}) and its
     # stdout is the answer (agent/interact.py, command_asker). For scripted runs and

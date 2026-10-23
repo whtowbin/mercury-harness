@@ -6,10 +6,40 @@ import json
 import os
 from pathlib import Path
 
-from agents import DEAD_PROXY, PROXY_VARS, Stats
+from agents import DEAD_PROXY, PRICES, PROXY_VARS, Stats
 
 VERSION = "2.4.6"
 COST_LIMIT = os.environ.get("MINI_COST_LIMIT", "2.0")
+
+
+# uvx resolves mini's dependencies afresh: litellm 1.106.0 (resolved 20 Oct) imports `mcp`, which
+# nothing installs, and every run died on its first call. 1.104.0 is what §94-§126 ran on.
+LITELLM = "1.104.0"
+# Models the pinned litellm has no price for (Mercury 2.5 and 3). mini refuses to run a model
+# it cannot cost, and ignoring that would switch off its spend limit, so their prices go in a
+# registry file written beside the run's output (readable inside the sandbox).
+UNMAPPED = {
+    "openrouter/inception/mercury-3": "mercury-3",
+    "openrouter/inception/mercury-2.5": "mercury-2.5",  # missing too (s131-mini: 0 of 30 ran)
+}
+
+
+def _registry(model: str, out: Path) -> Path | None:
+    if model not in UNMAPPED:
+        return None
+    pin, pcached, pout = PRICES[UNMAPPED[model]]
+    entry = {
+        "input_cost_per_token": pin / 1e6,
+        "output_cost_per_token": pout / 1e6,
+        "cache_read_input_token_cost": (pcached if pcached is not None else pin) / 1e6,
+        "litellm_provider": "openrouter",
+        "mode": "chat",
+        "supports_function_calling": True,
+    }
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "litellm_registry.json"
+    path.write_text(json.dumps({model: entry}))
+    return path
 
 
 def argv(goal: str, ws: Path, out: Path, model: str, reasoning: str) -> list[str]:
@@ -21,7 +51,11 @@ def argv(goal: str, ws: Path, out: Path, model: str, reasoning: str) -> list[str
         *(f"environment.env.{k}={DEAD_PROXY}" for k in PROXY_VARS),
         f"model.model_kwargs.reasoning_effort={reasoning}",
     ]
-    args = ["uvx", "--from", f"mini-swe-agent=={VERSION}", "mini", "-m", model, "-t", goal]
+    registry = _registry(model, out)
+    if registry:
+        overrides.append(f"model.litellm_model_registry={registry}")
+    args = ["uvx", "--from", f"mini-swe-agent=={VERSION}", "--with", f"litellm=={LITELLM}"]
+    args += ["mini", "-m", model, "-t", goal]
     args += ["-y", "--exit-immediately", "-l", COST_LIMIT, "-o", str(out / "traj.json")]
     args += ["-c", "mini.yaml"]
     for o in overrides:

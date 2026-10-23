@@ -5,7 +5,7 @@ sent (none = the harness default, 0.5, 0.0). One JSON line per call, then the mo
 share per arm and prompt: a temperature that arrives raises it. 0.0 is outside Inception's
 [0.5, 1.0] and is the control that §85 found reset to 1.0.
 
-  uv run python scripts/temperature_probe.py [OUT.jsonl] [N]
+  uv run python scripts/temperature_probe.py [OUT.jsonl] [N] [MODEL]
 """
 
 import json
@@ -20,7 +20,7 @@ import requests
 sys.path.insert(0, str(Path.cwd()))
 from agent.config import Settings
 
-MODEL = "inception/mercury-2.5"
+MODEL = sys.argv[3] if len(sys.argv) > 3 else "inception/mercury-2.5"
 URL = "https://openrouter.ai/api/v1/chat/completions"
 PROMPTS = {
     "word": "Choose one word at random from: apple, river, stone, cloud, ember, violin, harbor, "
@@ -31,7 +31,7 @@ PROMPTS = {
     "would you change? a) db/models/fields/__init__.py b) db/models/enums.py "
     "c) db/models/query.py d) forms/fields.py e) db/models/base.py. Reply with just the letter.",
 }
-ARMS: dict[str, float | None] = {"default": None, "t0.5": 0.5, "t0.0": 0.0}
+ARMS: dict[str, float | None] = {"default": None, "t1.0": 1.0, "t0.5": 0.5, "t0.0": 0.0}
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("results/s125-temp-probe.jsonl")
 N = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 HDR = {"Authorization": f"Bearer {Settings(workspace=str(Path.cwd())).api_key}"}

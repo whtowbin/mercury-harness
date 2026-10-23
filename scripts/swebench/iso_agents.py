@@ -6,7 +6,8 @@ iso.py gives a harness arm: a fresh one-commit repository per run, no `ro` acces
 `django.git`, and `agents.sandboxed()`'s profile (home folder unreadable except the run's own
 paths, the agent's tools and state; an allowlisted environment). Scored by iso's `score_state`.
 
-Use through `iso_s126.py` (arms `mini`, `mini-glm`, `goose` beside the harness arms). Network is
+Use through `iso_s126.py` (arms `mini`, `mini-glm`, `mini-m3`, `goose` beside the harness arms).
+Network is
 not confined: Goose's shell has the web, so `leaks()` is read after the run (see agents/goose.py).
 """
 
@@ -23,6 +24,7 @@ import runlimits
 from agents import ENV_KEEP, ENV_KEEP_PREFIXES, api_key, load, sandboxed
 
 MERCURY = "openrouter/inception/mercury-2.5"
+MERCURY3 = "openrouter/inception/mercury-3"
 GLM = "openrouter/z-ai/glm-5.3-flash"
 REASONING = "high"
 TIMEOUT_S = runlimits.env_seconds("AGENT_TIMEOUT_S", 900)
@@ -38,6 +40,7 @@ FIVE_HOUR_CAP = float(os.environ.get("CLAUDE_FIVE_HOUR_CAP", "0.5"))
 AGENT_ARMS = {
     "mini": ("mini", MERCURY),
     "mini-glm": ("mini", GLM),
+    "mini-m3": ("mini", MERCURY3),
     "goose": ("goose", MERCURY),
     "goose-glm": ("goose", GLM),
     "aider-glm": ("aider", GLM),

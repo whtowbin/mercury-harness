@@ -142,3 +142,66 @@ def test_a_failed_verify_that_contradicts_the_expectation_says_so(tmp_path, monk
     problem = _verify_step(ctx, _Trace(), step, _Settings())
     assert "verify command failed" in problem
     assert "you expected" in problem
+
+
+# -- §131.9: Settings.expected_result_gate off: record, do not retry ----------
+
+
+def test_with_the_gate_off_a_missing_expectation_is_accepted():
+    step = _step()
+    problem = _apply_result(step, {"summary": "did it", "verified": True}, gate_expected=False)
+    assert step.verified is True
+    assert problem == ""
+
+
+def _run_step(tmp_path, monkeypatch, gate: bool, verify: str):
+    """execute_step with only the model call scripted: a real workspace, trace,
+    approver and Settings, and the step's verify command actually run."""
+    import json
+
+    from agent.approval import Approver
+    from agent.config import Settings
+    from agent.phases import execute
+    from agent.phases.plan import Plan
+    from agent.tools import ToolContext
+    from agent.trace import Trace
+    from agent.workspace import Workspace
+
+    attempts = []
+
+    def scripted(*args, **kwargs):
+        attempts.append(kwargs.get("attempt_no"))
+        return {"summary": "did it", "verified": True}, []
+
+    monkeypatch.setattr(execute, "_attempt", scripted)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    trace = Trace(str(tmp_path / "traces"), run_id="t", echo=False)
+    ctx = ToolContext(workspace=Workspace(ws), approver=Approver(auto_approve=True), trace=trace)
+    settings = Settings(workspace=str(ws), expected_result_gate=gate, type_check_steps=False)
+    step = _step(verify=verify)
+    plan = Plan(goal="g", draft=[], steps=[step])
+    execute.execute_step(None, settings, plan, step, 0, ctx, trace)
+    kinds = [json.loads(line)["kind"] for line in trace.path.read_text().splitlines()]
+    return step, attempts, kinds
+
+
+def test_gate_off_runs_the_verify_once_and_records_the_gap(tmp_path, monkeypatch):
+    step, attempts, kinds = _run_step(tmp_path, monkeypatch, gate=False, verify="true")
+    assert attempts == [1]
+    assert "expected_result_missing" in kinds
+    assert "step_retry" not in kinds
+    assert step.verify_passed is True
+
+
+def test_gate_off_still_fails_a_step_whose_verify_fails(tmp_path, monkeypatch):
+    step, attempts, kinds = _run_step(tmp_path, monkeypatch, gate=False, verify="false")
+    assert len(attempts) == 2 and "step_retry" in kinds
+    assert step.verify_passed is False
+
+
+def test_gate_on_retries_without_running_the_verify(tmp_path, monkeypatch):
+    """Today's default, pinned so the A/B compares what it says it does."""
+    step, attempts, kinds = _run_step(tmp_path, monkeypatch, gate=True, verify="true")
+    assert len(attempts) == 2 and "step_retry" in kinds
+    assert step.verify_passed is not True

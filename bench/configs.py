@@ -12,10 +12,11 @@ mechanism at a time, executor swaps against Mercury, and mixed-model hybrids.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # Verified present on OpenRouter with tool-calling support, with $/M in/out.
 MERCURY = "inception/mercury-2.5"  # 0.040 / 0.150   diffusion
+MERCURY_3 = "inception/mercury-3"  # 0.100 / 0.350   diffusion (launch price; list 0.20 / 0.70)
 SONNET = "anthropic/claude-sonnet-5"  # frontier autoregressive
 HAIKU = "anthropic/claude-haiku-4.5"  # 1.000 / 5.000
 QWEN_FLASH = "qwen/qwen3.7-flash"  # 0.030 / 0.130   cheapest tool-capable
@@ -24,6 +25,10 @@ DEEPSEEK_FLASH = "deepseek/deepseek-v4-flash"  # 0.089 / 0.177
 GPT_NANO = "openai/gpt-5-nano"  # 0.050 / 0.400
 GPT_OSS = "openai/gpt-oss-120b"  # 0.037 / 0.170
 LAGUNA = "poolside/laguna-s-2.1"  # 0.090 / 0.180   coding-specialised
+# §131.16: the models Inception compares Mercury 3 with, at its price class, and Sonnet 5.5.
+HAIKU_55 = "anthropic/claude-haiku-5.5"  # 0.100 / 0.500
+GPT6_LUNA = "openai/gpt-6-luna"  # 0.100 / 0.500
+SONNET_55 = "anthropic/claude-sonnet-5.5"  # 2.000 / 10.000
 
 
 @dataclass
@@ -119,6 +124,10 @@ class AgentConfig:
     cache_prompts: bool = True
     # Run each step's verify command and hand failures back.
     verify_steps: bool = True
+    # Forwarded to Settings by name (§131.9; off by default since).
+    expected_result_gate: bool = False
+    # Forwarded to Settings by name (§131.12; on by default since).
+    runaway_effort_step_down: bool = True
     # Retry a failed step once with reasoning turned up.
     escalate_on_failure: bool = True
     # The deterministic gate after review: re-run every verify command and the
@@ -224,6 +233,18 @@ register(
         reviewer=MERCURY,
         planner_reasoning="high",
         description="dLLM baseline: Mercury does all three phases",
+    )
+)
+
+register(
+    AgentConfig(
+        name="mercury3-only",
+        planner=MERCURY_3,
+        executor=MERCURY_3,
+        reviewer=MERCURY_3,
+        planner_reasoning="high",
+        group="executor",
+        description="mercury-only with Mercury 3 in every phase",
     )
 )
 
@@ -1749,3 +1770,83 @@ register(
         description="mercury-inception with Mercury's output capped at 16,000 tokens a call",
     )
 )
+
+# §131.6: mechanisms Mercury 2.5 was measured without, re-tried with Mercury 3. Each is its
+# Mercury 2.5 namesake with the three models swapped.
+for _base in (
+    "mercury-direct",
+    "mercury-noreview",
+    "mercury-plan-probe-required",
+    "mercury-exec-medium",  # §131.10: 14 SciCode calls ran to the 16k cap reasoning at high
+):
+    _cfg = get(_base)
+    register(
+        replace(
+            _cfg,
+            name=_base.replace("mercury-", "mercury3-", 1),
+            planner=MERCURY_3,
+            executor=MERCURY_3,
+            reviewer=MERCURY_3,
+            group="executor",
+            description=f"{_base} with Mercury 3 in every phase (§131.6)",
+        )
+    )
+
+# §131.9: §27's expected_result gate, off by default since the A/B; these price turning it back on.
+for _base, _name in (("mercury-only", "mercury-er-gate"), ("mercury3-only", "mercury3-er-gate")):
+    register(
+        replace(
+            get(_base),
+            name=_name,
+            expected_result_gate=True,
+            group="executor",
+            description=f"{_base} with §27's expected_result gate (a missing one retries the step)",
+        )
+    )
+
+# §131.12: the runaway step-down is on by default since its A/B; this prices turning it off.
+register(
+    replace(
+        get("mercury3-only"),
+        name="mercury3-no-step-down",
+        runaway_effort_step_down=False,
+        group="executor",
+        description="mercury3-only with a runaway call repeated, not stepped down (§131.12)",
+    )
+)
+
+# §131.18: Mercury 3 at low effort in planning and execution, against mercury3-only (high).
+register(
+    replace(
+        get("mercury3-only"),
+        name="mercury3-low",
+        planner_reasoning="low",
+        executor_reasoning="low",
+        group="executor",
+        description="mercury3-only at low reasoning effort in planning and execution (§131.18)",
+    )
+)
+
+# §131.16: other models in every phase, on the private fixtures (no model saw them in training).
+# Sonnet 5.5 at low reasoning, as in §127.6; the others at mercury-only's settings.
+for _name, _model, _low in (
+    ("haiku55-only", HAIKU_55, False),
+    ("luna-only", GPT6_LUNA, False),
+    ("sonnet55-only", SONNET_55, True),
+):
+    register(
+        replace(
+            get("mercury-only"),
+            name=_name,
+            planner=_model,
+            executor=_model,
+            reviewer=_model,
+            planner_reasoning="low" if _low else "high",
+            executor_reasoning="low" if _low else "high",
+            # OpenAI's strict mode wants every property listed as required; the harness's
+            # optional parameters fail it (list_dir's `path`), so Luna runs without strict.
+            strict_tool_schemas=_model != GPT6_LUNA,
+            group="executor",
+            description=f"mercury-only with {_model} in every phase (§131.16)",
+        )
+    )

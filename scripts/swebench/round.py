@@ -44,6 +44,7 @@ RUN_TIMEOUT_S = float(os.environ.get("ROUND_RUN_TIMEOUT_S", "1800"))
 RESULTS = REPO / "results" / "s94-harness-compare.txt"
 GLM = "z-ai/glm-5.3-flash"
 MERCURY = "inception/mercury-2.5"
+MERCURY_3 = "inception/mercury-3"
 AGENT_PY = "agent.py"  # scripts/agents through one driver (§109)
 # arm -> (driver, extra environment). The driver's `run` and `score` take (ROUND, ID).
 ARMS: dict[str, tuple[str, dict[str, str]]] = {
@@ -67,6 +68,13 @@ ARMS: dict[str, tuple[str, dict[str, str]]] = {
             "--provider-sort latency"
         },
     ),
+    # Mercury 3 in every phase (bench config `mercury3-only`), and in the other agents.
+    "mercury3-only": (
+        "swe.py",
+        {"SWE_MODELS": f"--planner {MERCURY_3} --executor {MERCURY_3} --reviewer {MERCURY_3}"},
+    ),
+    "mini-mercury3": ("mini.py", {"MINI_MODEL": f"openrouter/{MERCURY_3}"}),
+    "aider-mercury3": ("aider.py", {"AIDER_MODEL": f"openrouter/{MERCURY_3}"}),
     "mini-glm": ("mini.py", {"MINI_MODEL": f"openrouter/{GLM}"}),
     "aider-glm": ("aider.py", {"AIDER_MODEL": f"openrouter/{GLM}"}),
     "goose": (AGENT_PY, {"AGENT": "goose", "AGENT_MODEL": MERCURY}),
@@ -78,6 +86,9 @@ CAPS: dict[str, tuple[float, float]] = {
     "mini": (900, 0.25),
     "mercury-only": (900, 0.25),
     "glm-plan": (900, 0.50),
+    "mercury3-only": (900, 0.25),  # 2.5x Mercury 2.5's token price; same cap until measured
+    "mini-mercury3": (900, 0.25),
+    "aider-mercury3": (900, 2.0),
     "glm-only": (900, 0.50),
     "mini-glm": (900, 0.50),
     "aider": (900, 2.0),

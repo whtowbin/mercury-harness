@@ -87,7 +87,7 @@ FINISH_STEP = Tool(
                 "command (or, if it has none, whatever you ran to "
                 'convince yourself) to show — "4 passed", '
                 '"prints total 42.0", "exits non-zero, the '
-                'file is still missing". Required whenever '
+                'file is still missing". Give it whenever '
                 "verified is true. It is recorded with the step "
                 "and the harness compares it with the verify "
                 "command's outcome; a mismatch is logged for "

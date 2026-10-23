@@ -165,6 +165,7 @@ ON_OFF = [("On", "on"), ("Off", "off")]
 # dropdown.
 KNOWN_MODELS = [
     "inception/mercury-2.5",
+    "inception/mercury-3",
     "z-ai/glm-5.3-flash",
     "anthropic/claude-sonnet-5",
     "anthropic/claude-haiku-4.5",

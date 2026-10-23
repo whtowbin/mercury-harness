@@ -798,10 +798,14 @@ def _already_tried(messages: list[dict], limit: int = 14) -> str:
     return "\nWhat the previous attempt already did (do not simply repeat it):\n" + "\n".join(shown)
 
 
-def _apply_result(step: Step, result: dict | None) -> str:
+def _apply_result(step: Step, result: dict | None, gate_expected: bool = True) -> str:
     """Update `step` from one attempt's result. Returns "" when the attempt
     looks like it succeeded (still subject to its own verify command),
-    otherwise the problem text to feed the next retry."""
+    otherwise the problem text to feed the next retry.
+
+    `gate_expected` (Settings.expected_result_gate): whether verified=true
+    without an expected_result fails the attempt. Off, the gap is left for the
+    caller to record and the step's verify command still decides (§131.9)."""
     if not result:
         step.summary = "executor never called finish_step; step may be incomplete"
         return "You never called finish_step, so the step was left unfinished."
@@ -810,7 +814,7 @@ def _apply_result(step: Step, result: dict | None) -> str:
     step.notes = str(result.get("notes", ""))
     step.expected_result = str(result.get("expected_result", "")).strip()
     if not result.get("incomplete"):
-        if step.verified and not step.expected_result:
+        if gate_expected and step.verified and not step.expected_result:
             step.verified = False
             return (
                 "You reported verified=true without saying what you expected your "
@@ -1275,7 +1279,9 @@ def execute_step(
         step.attempts = attempt + 1
         step.seconds = time.time() - started
 
-        problem = _apply_result(step, result)
+        problem = _apply_result(step, result, settings.expected_result_gate)
+        if not problem and step.verified and not step.expected_result:
+            trace.event("expected_result_missing", step=step.id, attempt=attempt + 1)
         # The verify command is the only independent evidence the step
         # worked, so it runs whenever the result itself raised no problem —
         # and, per _rescued_by_verify below, also in the one case where the

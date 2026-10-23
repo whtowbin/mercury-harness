@@ -2,6 +2,7 @@
 when a sighting is evidence."""
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -72,3 +73,45 @@ def test_a_sighting_counts_before_the_first_edit_and_not_after_writing_it():
         "r", "mini", "1", "mini", [{"text": f"echo '{line}' > core.py", "output": line}]
     )
     assert ct.leaks(written, [line]) == []
+
+
+def test_every_iso_arm_is_recognized_with_the_longest_name_winning():
+    """An arm missing from ARMS is silently skipped: §126's harness arms were never read."""
+    import re
+
+    iso_s126 = (REPO / "scripts" / "swebench" / "iso_s126.py").read_text()
+    arms = re.findall(r'iso\.ARMS\["([^"]+)"\]', iso_s126)
+    assert arms, "found no arms in iso_s126.py"
+    for arm in arms:
+        assert ct.split_dir(f"s131-dj-r1-{arm}") == ("s131-dj-r1", arm)
+
+
+def _mini_traj(path: Path, command: str, output: str) -> None:
+    path.parent.mkdir(parents=True)
+    call = {"id": "c1", "function": {"name": "bash", "arguments": json.dumps({"command": command})}}
+    msgs = [
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps({"output": output})},
+    ]
+    path.write_text(json.dumps({"messages": msgs}))
+
+
+def test_iso_mini_trajectories_are_read_with_round_and_arm_parsed(tmp_path, monkeypatch):
+    """iso_agents.py writes <round>-<arm>/out/<task>/traj.json, not <round>/mini/*.traj.json."""
+    _mini_traj(tmp_path / "s131-dj-r2-mini-m3" / "out" / "11790" / "traj.json", "ls", "x")
+    _mini_traj(tmp_path / "s126-dj-r1-mini" / "out" / "11815" / "traj.json", "ls", "x")
+    _mini_traj(tmp_path / "s126-dj-r1-mini" / "out" / "11815.abandoned-1" / "traj.json", "ls", "x")
+    monkeypatch.setattr(ct, "RUNS", tmp_path)
+    got = {(r.round, r.arm, r.task, r.agent) for r in ct.external_runs() if r.agent == "mini"}
+    assert got == {
+        ("s131-dj-r2", "mini-m3", "11790", "mini"),
+        ("s126-dj-r1", "mini", "11815", "mini"),
+    }
+
+
+def test_a_curl_to_the_github_api_is_a_web_route():
+    cmd = "curl -s https://api.github.com/repos/django/django/pulls/123/files"
+    run = ct.Run("r", "mini-m3", "1", "mini", [{"text": cmd, "output": ""}])
+    assert "web" in ct.routes(run)
+    quiet = ct.Run("r", "mini-m3", "1", "mini", [{"text": "pytest tests/x.py", "output": ""}])
+    assert "web" not in ct.routes(quiet)

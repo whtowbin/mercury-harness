@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runlimits
+from webdeny import GITHUB_MIRRORS, SEARCH_DENY
 
 REPO = Path(__file__).resolve().parents[2]
 # Problems, reference data (drive/test_data.h5, 1 GB, from the SciCode release) and the scoring
@@ -26,6 +27,17 @@ SCORE_PY = DATA / "score-env" / "bin" / "python"
 HARNESS = os.environ.get("SCI_HARNESS", str(REPO / ".venv" / "bin" / "harness"))
 # SciCode's own sources (DESIGN-LOG §80): the answers were fetched from these.
 WEB_DENY = ["scicode-bench", "SciCode1/SciCode"]
+# Copies of the dataset Mercury 3 reached (§131.5): NeMo Gym's, Hugging Face mirrors, and a
+# SciCode repository path anywhere. Not a bare "scicode": problem 51 is SciCode_Example.
+WEB_DENY += [
+    "nvidia-nemo/gym",
+    "huggingface.co/datasets",
+    "huggingface.co/api/datasets",
+    "datasets-server.huggingface.co",
+    "/scicode/",
+    *GITHUB_MIRRORS,
+    *SEARCH_DENY,
+]
 AGENT_DEPS = ["numpy", "scipy", "sympy", "matplotlib"]
 # Each run's wall limit: about 1.5x the slowest SciCode run on record (15.6 min); §96.2.
 RUN_TIMEOUT_S = runlimits.env_seconds("SCI_RUN_TIMEOUT_S", 1200)
@@ -184,6 +196,7 @@ def run_one(root: Path, pid: str) -> None:
                 os.environ.get("SCI_MAX_USD", "2.0"),  # a per-problem spend cap (§109)
                 "--no-memory",
                 "--no-clarify",
+                "--no-ask",  # no one answers a SciCode run (§131.11: 5 ask_user calls in one round)
                 "--no-animate",
                 *[arg for pat in WEB_DENY for arg in ("--web-deny", pat)],
                 "--trace-dir",
@@ -205,7 +218,11 @@ def _score_one(root: Path, pid: str) -> list[bool]:
     p = problems((root / f"{pid}.split").read_text())[pid]
     sol = root / pid / "solution.py"
     code = sol.read_text() if sol.exists() else ""
-    return score_code(p, code, root / "scoring" / pid) if code else [False] * len(p["sub_steps"])
+    if code:
+        return score_code(p, code, root / "scoring" / pid)
+    # No solution: every step fails, but broken steps stay unscored as in score_code (§131: a run
+    # with no code for problem 70 was scored 0/8, not 0/7).
+    return [False for s in p["sub_steps"] if s["step_number"] not in BROKEN_STEPS]
 
 
 def score(root: Path) -> None:

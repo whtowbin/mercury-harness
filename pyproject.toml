@@ -176,8 +176,11 @@ unresolved-attribute = "ignore"
 # Every other rule applies.
 include = [
     "scripts/analysis/post_figures.py",
+    "scripts/docs_tui_screenshots.py",
     "scripts/analysis/post_tables.py",
     "scripts/analysis/post1_new_figures.py",
+    "scripts/analysis/post3_figures.py",
+    "scripts/medium_tables.py",
     # The docs build's Sphinx and docutils, installed from docs/requirements.txt.
     "docs/conf.py",
 ]

@@ -26,6 +26,10 @@ def clean_env() -> dict[str, str]:
     in tool output the model has to read, so drop it."""
     env = dict(os.environ)
     env.pop("VIRTUAL_ENV", None)
+    # CDPATH makes the shell's `cd tests` land in another directory when that has a
+    # `tests/`, and prints the path; an approved `cd tests && ...` would then run
+    # outside the workspace. No command here needs it.
+    env.pop("CDPATH", None)
     env.setdefault("NO_COLOR", "1")
     env.setdefault("PYTHONIOENCODING", "utf-8")
     # Every subprocess the agent runs is a one-shot: a verify command, a test

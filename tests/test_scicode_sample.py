@@ -59,3 +59,12 @@ def test_candidates_run_in_a_real_subprocess_and_group_by_output(tmp_path):
     assert sigs[3] is None
     assert sigs[0] == sigs[2] and sigs[0] != sigs[1]
     assert sample.choose(sigs) == 0
+
+
+def test_a_problem_with_no_solution_leaves_broken_steps_unscored(tmp_path):
+    """Problem 70 has 8 sub-steps, one broken (70.8): no solution scores 0 of 7, as code would."""
+    sci = sample.sci
+    (tmp_path / "70.split").write_text("dev")
+    (tmp_path / "70").mkdir()
+    res = sci._score_one(tmp_path, "70")
+    assert res == [False] * 7

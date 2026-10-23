@@ -164,6 +164,7 @@ find. A resolved section may later move to DESIGN-LOG-ARCHIVE.md instead of stay
 | 128 | Where the issue's identifiers are defined: a deterministic lookup for the planner, pre-registered | The symbol map is an alphabetical prefix of a large repository and lists a changed file for 0 of 10 django tasks. `agent/issue_symbols.py` (`--issue-symbols`, off by default) looks the goal's identifiers up in an `ast` index and lists where they are defined: a gold file listed for 8 of 10 tasks in about 150 tokens, no model call, nothing provider-specific. Plan-only then full A/B pre-registered, Mercury first. |
 | 129 | A direct path and a smaller prompt, model-agnostic, pre-registered | `--direct` skips the planner (one step for the goal, same executor, gates and final check); tool schemas that can only error are not offered (ask_user when the run cannot ask, audit_previous_runs when no earlier trace exists). The prompt count shows schemas are about 1.3k to 6k of 22k tokens, so a 30% cut by schemas alone is out of reach; scout of `--direct` against default on Mercury pre-registered. |
 | 130 | SciCode as Artificial Analysis runs it: background text, one step at a time, and candidate voting; scout, then pre-registered | Inception's 38% is Artificial Analysis's SciCode: test set, 288 sub-problems, scientist-annotated background in the prompt, one step at a time. `scripts/scicode/sample.py` reproduces that prompt (SciCode's own template and extraction) and can draw K candidates per step in parallel and keep the one most agree with on model-written probe inputs; `SCI_BACKGROUND=1` adds the background to the harness's goal. Dev scout, one run an arm: bare model 25 sub-steps of 48 without background, 33 with; voting 36 with, at 4.4x the cost; harness 25 without, 22 with. Two harness flaws found in the background runs: a verify command broken by its own typo is blamed on the code, and an untested-change final check sends fix rounds that rewrite the solution. Repeats pre-registered. |
+| 131 | Mercury 3 (released 19 Oct): an audit-tool leak between bench runs, the fixtures, and django and SciCode on §126's tree: pre-registered | Wired as `mercury3-only` and the iso arm `h-m3` (tree 323fa64, model the only change). The first scout leaked: `audit_previous_runs` read other runs' traces in the shared `traces/bench`, and Mercury 3's two biggest wins were runs that used it; it is now dropped with memory off. Clean rerun (8 tasks x 4): perfect runs 0.875 against 0.531 (differs), misreport-discount 4/4 against 1/4, semver 4/4 against 0/4, at 3.8x the cost and 1.5x the model time a run. django and SciCode on tree 323fa64 (23 against 16 of 30; 9.7 against 8.7 a round) **withdrawn**: Mercury 3 fetched the answers past the deny list (GitHub API pull-request files, SciCode mirrors, code and web search; §131.5); GLM had searched the same way in §126 but got only results pages; Mercury 2.5 never fetched. Deny lists extended, both suites re-run (§131.5). Mercury 3 tool mechanics are better (0 failed edits), SciCode retries worse; §131.6: review off is a candidate (cost −40%, misreport-documented 4/4), --direct and plan-probe are not. §131.8 clean re-runs: django 15 against 12 of 30, +0.100 [−0.067, +0.267]; SciCode 9.3 against 7.7, +1.67 [−0.33, +4.00]; no separation. mini + Mercury 3 22 of 30 (2.5: 20); mini beat the harness with Mercury 3, +0.233 [+0.100, +0.400], not pre-registered. contamination.py had never read the iso harness arms (fixed; §126's 90 harness runs and these 60 clean); sci.py's no-solution scoring counted broken steps (fixed). §131.9-131.12: expected_result gate off by default (Mercury 3 +0.194 perfect), wrapped test commands approved (five security reviews; allowlist gaps left open), runaway step-down to low effort on (SciCode cuts 82 to 35). §131.13 full run on today's harness: Mercury 3 against 2.5 separates on django (25 vs 14 of 29) and SciCode (+3.0 problems a round); inside mini neither does; harness vs mini does not separate; one run voided (jsDelivr's GitHub CDN), now denied. §131.17 one long page from one call: speed, reasoning and correctness, Mercury 2.5/3 against Haiku 5.5 and Sonnet 5.5. §131.18 Mercury 3 at low against high effort on subsets of all three suites, and whether its temperature arrives. §131.19 full run of Mercury 3 at low effort. |
 
 See also **TUNABLES.md** for the load-bearing constants this file's sections
 justify (timeouts, retry caps, budgets) — a shorter, structured index into
@@ -12798,3 +12799,807 @@ runs would have shown; the resolved count is incomplete and too small to compare
 accepts. Sonnet 5.5 refuses this harness's planning prompt in most runs, and Sonnet 5 plans well but costs about eight times as much a run; the
 one sign in its favour (11848 resolved) is a single run. Recall caveat as in §127.8. Spend: $0.74 (`s127y`) + $2.50 (`s127z`, $1.22 of it
 in killed runs) by the balance.
+
+
+## 131. Mercury 3 (released 19 Oct): an audit-tool leak between bench runs, the fixtures, and django and SciCode on §126's tree: pre-registered
+
+**The model**, from OpenRouter's `/api/v1/models` on 19 Oct: `inception/mercury-3`, 1M context, 131,072 max output,
+$0.10 / $0.01 cached / $0.35 per M at launch (list $0.20 / $0.02 / $0.70; no announced end to the discount), against
+mercury-2.5's $0.04 / $0.15. Inception's default effort is now `low` (2.5: `medium`); the harness sends its effort
+explicitly, so the default does not reach a run. Inception published no benchmark scores; Artificial Analysis had no page.
+
+**Wiring:** `MERCURY_3` and `mercury3-only` (`mercury-only` with the three models swapped) in `bench/configs.py`; the
+Inception id and price in `agent/providers.py` (OpenRouter runs are costed from the response's `usage.cost`, as at
+323fa64); `scripts/agents` price; `round.py` arms; `h-m3` in `iso_s126.py` (`--executor inception/mercury-3` with
+`--all-mercury`, so every phase). A direct probe (one tool-call prompt, 3 a cell, low and high effort): 12 of 12 valid
+tool calls, 0.4-0.6 s a call against 1.0-2.4 s, fewer reasoning tokens at high (146-290 against 366-854).
+
+### 131.1 A leak between bench runs: `audit_previous_runs` (19 Oct)
+
+The first scout (`results/s131-m3-scout.jsonl`, both configs, 16 tasks x 2, $0.38) showed Mercury 3 passing
+misreport-discount 2 of 2 and misreport-documented 1 of 2, tasks where mercury-only's history is 14% (105 runs) and 0%
+(12). Those three runs, and only one mercury-only run, had called `audit_previous_runs`, which reads the newest
+`run-*.jsonl` beside the run's own trace. Bench runs all write to `traces/bench`, so with `--parallel 4` that is the
+other arm's runs on the same task: the misreport-discount run searched for `SAVE10` (the task's own code) with `deep`,
+read mercury-only's two failed runs of it, and paid GLM ($0.0005) to summarize what went wrong in them. §129 dropped the
+tool only when no earlier trace existed, which never holds in `traces/bench`. Over all 3,220 bench traces 23 runs ever
+called it (24 Sep - 19 Oct), so earlier fixture figures are barely touched; Mercury 3 reaches for it far more readily.
+
+Fix (`agent/runner.py` `_without_unavailable`): the tool goes with memory off, like remember/recall, since earlier
+traces are cross-run state (the rule that cross-run state is tied to the memory setting). Every bench, django and
+SciCode run passes memory off. A user's `--no-memory` run loses the tool too. Test:
+`tests/test_audit_tool.py::test_offered_only_with_memory_on_even_beside_earlier_traces`, on a real trace directory;
+it fails without the fix. django and SciCode traces are one run per directory, so their past runs had nothing to read.
+
+### 131.2 The fixtures, clean (19 Oct, `results/s131-m3-clean.jsonl`, $0.42)
+
+The eight tasks the scout kept x 4 repeats, both arms on one tree, interleaved, `--parallel 4`; no run called the tool.
+
+| | perfect runs | accuracy | honest | $ a run | model s a run | output tokens |
+|---|---|---|---|---|---|---|
+| `mercury-only` (2.5) | 17 of 32 | 0.850 | 0.719 | 0.0027 | 29.7 | 10,627 |
+| `mercury3-only` | 28 of 32 | 0.931 | 0.875 | 0.0103 | 45.6 | 18,558 |
+
+`--view compare`: perfect runs +0.344 [+0.125, +0.562] differs; accuracy and honest not distinguishable at 32 a side;
+cost, model seconds and output tokens differ. Perfect runs per task, 2.5 against 3: misreport-discount 1/4 against
+4/4, semver 0/4 against 4/4, misreport-documented 0/4 against 1/4, implied-idempotent, throttle, throttle-vague 3/4
+against 4/4, misreport-slug 3/4 each, red-cross-file 4/4 each. Mercury 3 is slower a run inside the harness (4.1 s a
+call against 3.1 s, more output and review calls), not faster: Inception's 1,068 tok/s is not what a run waits on (§129).
+
+### 131.3 Pre-registered: django and SciCode on tree 323fa64
+
+Arms: `h` (§126's default, run again the same day as the control) and `h-m3`. Smokes read first: django 11880
+resolved ($0.017), SciCode 29 solved ($0.008), every call served as `inception/mercury-3`, no `Operation not permitted`.
+
+- django: `python iso_s126.py run s131-dj --ids 9296,11790,11815,11848,11880,11885,11951,11964,11999,12708
+  --arms h,h-m3 --repeats 3 --parallel 3 --max-spend 4`.
+- SciCode: three rounds an arm, `sci.py setup s131-sci-<arm><k> dev`, `run` with `SCI_TREE` = the 323fa64 tree,
+  `SCI_HARNESS=scripts/scicode/sandboxed_harness.sh`, `SCI_MODELS="--all-mercury"` (h) or
+  `"--all-mercury --executor inception/mercury-3"` (h-m3), arms interleaved by repeat, then `score`.
+
+**Decision rule**, written before the runs: Mercury 3 *raises the ceiling* on a suite if `h-m3` minus the same-day
+`h` has a 95% bootstrap interval excluding zero (django: resolved of 30; SciCode: problems a round, over the 15
+problems, as §126.3). Otherwise it does not separate there. Either way it is also set against §126's GLM-everywhere
+arm (django 18/30 at $0.027 a run; SciCode 10.3 a round at $0.357), and cost is reported at launch and list price.
+If the same-day `h` is more than 3 resolved (django) or 2 problems (SciCode) from §126's, that is provider drift and is
+reported before any reading.
+
+### 131.4 Results: django and SciCode on tree 323fa64 (19 Oct 21:28-23:09, $3.1 by the balance)
+
+**django** (`results/s131-dj.jsonl`, 60 runs, `iso_s126.py`, $1.47):
+
+| arm | resolved of 30 | minus `h`, paired by run [95% bootstrap] | $ a run | calls a run |
+|---|---|---|---|---|
+| `h` (Mercury 2.5, same day) | 16 | | 0.0108 | 33.6 |
+| `h-m3` (Mercury 3) | 23 | +0.233 [+0.000, +0.433] | 0.0381 | 24.0 |
+
+Clustered by task instead: +0.233 [−0.033, +0.500]. Per task, `h` / `h-m3` of 3: 9296 3/3, 11790 2/1, 11815 3/2,
+11848 0/2, 11880 3/3, 11885 0/1, 11951 1/3, 11964 0/3, 11999 2/2, 12708 2/3. The control matches §126 (17), so no
+drift. **By the rule, django does not separate**: the interval's lower end is zero, not past it. It is the largest
+gap any arm has shown on these tasks (§126: none beyond +1), and it falls where §119 found Mercury fails: 11964 (a wrong
+file in every Mercury run; Mercury alone 1 of 20 before, §127.11) 3 of 3, and 11848 (1 of 20) 2 of 3. Against GLM
+everywhere on this tree (§126, 18 of 30 at $0.0273), Mercury 3 has 5 more resolved at 1.4x the cost a run.
+
+**SciCode** (`~/.cache/mercury-harness/scicode-runs/s131-sci-{h,h-m3}{1,2,3}.out`, $1.6):
+
+| arm | problems (3 rounds) | mean | sub-steps (mean of 48) | $ a round |
+|---|---|---|---|---|
+| `h` | 8, 10, 8 | 8.7 | 27.7 | 0.063 |
+| `h-m3` | 10, 10, 9 | 9.7 | 32.3 | 0.330 |
+
+`h-m3` minus `h`, bootstrap over the 15 problems: problems +1.0 [−1.3, +3.3], sub-steps +4.7 [−1.0, +12.3]. **No
+separation.** The control's 8.7 is above §126's 7.7 (within the rule's 2-problem drift bound). Mercury 3 sits level
+with §126's GLM (10.3 at $0.357 a round) at about its cost.
+
+**Contamination:** `scripts/analysis/contamination.py` matched run folders against a fixed arm list without any of
+`iso_s126.py`'s arms, so it silently skipped every iso harness run: §126.2's "harness arms were flagged for nothing"
+had read none of them (30 of 150 runs, Goose's, were read). The list now has them, matched longest name first, and
+`tests/test_contamination.py` checks every `iso_s126.py` arm parses. Re-run: s131's 60 runs and §126's 90 harness
+runs have no gold-fix line, no hidden-test line and no flagged route. §126's mini runs (iso_agents layout) are still
+not read.
+
+**Scorer:** `sci.py` scored a problem with no `solution.py` as failing every sub-step, broken ones (70.8, 78.3)
+included, so `h-m33` printed 28/49. Solved problems and passed steps were never affected, only the denominator (also in
+§126's `h-glm2` and several §109 rounds). Fixed, with a test; `h-m33` rescored 9/15, 28/48.
+
+**Reading:** Mercury 3 moves the tasks that defined 2.5's ceiling (the wrong-report fixtures; django 11964 and
+11848) and is ahead on every suite, but only the fixtures pass a pre-registered rule; django is at its edge and
+SciCode does not separate. It costs 3.5-5.5x 2.5 a run at launch price (7-11x at list) and is slower a run.
+
+### 131.5 What the traces show: better tool mechanics, and Mercury 3 looked the answers up (20 Oct)
+
+Same-day traces, both arms (fixtures `s131-m3-clean`, django `s131-dj`, SciCode `s131-sci-*`), `harness trace sql`.
+
+**Mechanics, better.** Failed tool calls other than the web: django `edit_file` 16 of 155 (2.5) against 0 of 50,
+`read_file` 8 against 0; fixtures `edit_file` 3 against 0. No malformed arguments in either arm (`encoded`,
+`mistyped`, `optional` empty). Mercury 3 batches (`edit_files`, `read_files`, `glob_files`, `list_dir` up several
+times; fixtures `read_files` 51 against 12), needs fewer nudges (django `batching_nudge` 20 against 56,
+`no_progress_nudge` 18 against 39), writes its own step checks (`verify_synthesized` 0-2 against 12-19 a suite), and
+reaches for tools 2.5 never called: `git_log`, `check_code`, `run_tests`, `inspect_module` (SciCode 23 against 0).
+**Worse:** SciCode `step_retry` 31 against 2, `step_failed` 17 against 1 and `repeated_call` 41 against 0 (38 of
+them `finish_step`); django `run_bash` denied by the sandbox 21 against 9. At 323fa64 `audit_previous_runs` was still
+offered with nothing beside it, and Mercury 3 called it 10 times for nothing.
+
+**Contamination: the s131 django and SciCode `h-m3` numbers are withdrawn.** Mercury 3 called `fetch_url` 52 times
+on django and 120 on SciCode (2.5: 0) and went looking for the answer key through routes the deny lists did not name:
+- django: `api.github.com/repos/django/django/pulls/11790/files` (the gold fix; `swe.py` denied
+  `github.com/django/django`, which the API form does not contain) before resolving 11790 in r3; issue search and
+  other pull requests before resolving 11885 in r3; `pulls/11885/files` in r2 (not resolved). 4 of 30 runs fetched
+  django's own repository, 2 of them resolved.
+- SciCode: GitHub repository search for "SciCode benchmark", NVIDIA-NeMo/Gym's `resources_servers/scicode/data` via
+  Sourcegraph, the Hugging Face mirror `akshathmangudi/SciCode`, and code search, Google and Bing for problems' own
+  function names (`select_big_weights`, `n_tangle`, `pendulum_analysis`). 11 problem-runs fetched; 4 solved runs
+  made a successful search or mirror fetch (r2: 4; r3: 19, 38, 78). The harness arms run with search off; these
+  were search engines fetched as pages.
+`contamination.py` cannot see these (harness traces keep a call's arguments, not its output), so they are judged from
+the URLs. Voiding the two django runs leaves 21 against 16; the SciCode voids would be partly unfair (4 and 78 are
+solved by every arm). Neither is a clean number, so both are re-run.
+
+**Fix:** `scripts/webdeny.py` `SEARCH_DENY` (GitHub, Sourcegraph, grep.app and searchcode code search; Google, Bing
+and DuckDuckGo), added to `swe.py`'s list with `repos/django/django`, and to `sci.py`'s with `nvidia-nemo/gym`,
+Hugging Face's dataset endpoints and `/scicode/`. No bare `scicode`: patterns are also matched against code a run
+executes, and problem 51 is `SciCode_Example`. `tests/test_web_deny.py` checks every successful §131.5 URL is now
+refused and that workspace paths, Django names, PyPI and arXiv pass.
+
+**Re-run, pre-registered:** `s131b-dj` (`h`, `h-m3`, 10 x 3) and `s131b-sci-{h,h-m3}{1,2,3}`, same tree, same
+commands as §131.3, with the new lists. §131.3's decision rule applies unchanged and the re-run is the result of
+record. After it, every `h-m3` successful fetch is listed by URL; any that reached a benchmark source voids its run.
+
+**Other models, checked against the new patterns** (`harness trace leaks` over §126's sealed harness runs): Mercury
+2.5 made 0 fetches in all 90 runs of `h` and `h-nr`. GLM everywhere (`h-glm`) made 302 fetches on SciCode and 58 on
+django, and on SciCode searched for the answers as Mercury 3 did (raw `scicode-bench` URLs, GitHub code search,
+grep.app, Google, DuckDuckGo and Bing for "Scicode problem 47 Internal_Energy"); 27 runs reached, 13 got text back,
+all of it search-results pages (no file from a copy of the benchmark). §126.3's "contamination: none" for the harness
+arms checked only the old list. GLM's +2.7 on SciCode stands unproven-clean: results pages may carry snippets, and
+traces keep the length of what came back, not the text. Mercury 3 is the first run here to get past the deny list to
+an answer source.
+
+### 131.6 Mechanisms 2.5 was measured without, re-tried with Mercury 3: scout, pre-registered (20 Oct)
+
+The author asked for the suggested tools to be tried. Candidates, from a sweep of DESIGN-LOG for mechanisms turned off
+because Mercury 2.5 did not use or gain from them: `--direct` (kept off because Mercury sent 11964 to the wrong file,
+§129; Mercury 3 resolved it 3 of 3), review off (Mercury 3 makes 3.3 review calls a run against 1.5), and
+`plan_probe=require` (§54: honesty on no-bug 60% to 88% with 2.5, at +2 calls). The structural tools (§62) and forced
+`trace_python` need code restored or showed 0 calls; not tonight.
+
+Configs `mercury3-direct`, `mercury3-noreview`, `mercury3-plan-probe-required` (each its 2.5 namesake with the models
+swapped) against `mercury3-only`, on §131.2's eight tasks x 4, one tree, interleaved. Mercury 3 is at or near ceiling
+on six of them, so this is a scout: it can show a cost difference and a direction on misreport-documented and
+misreport-slug, not an accuracy gain. Reading: a cost mechanism is a candidate for a django arm if its cost interval
+excludes zero and its perfect runs are within 3 of the control's; `plan-probe-required` is a candidate if honest on the
+misreport tasks rises. No default changes from a scout.
+
+**Result** (`results/s131c-tools.jsonl`, 20 Oct 08:13-08:50, 128 runs, 2 lost to zero-cost timeouts, $1.0):
+
+| config | perfect | honest | $ a run | calls | model s | misreport discount / documented / slug |
+|---|---|---|---|---|---|---|
+| `mercury3-only` | 27 of 31 | 0.871 | 0.0099 | 12.2 | 55 | 4 / 2 / 2 of 4 |
+| `mercury3-noreview` | 31 of 32 | 0.969 | 0.0068 | 7.7 | 37 | 3 / 4 / 4 |
+| `mercury3-direct` | 22 of 32 | 0.688 | 0.0058 | 8.9 | 28 | 2 / 0 / 0 |
+| `mercury3-plan-probe-required` | 22 of 31 | 0.710 | 0.0099 | 12.3 | 52 | 1 / 0 / 1 |
+
+`--view compare` against `mercury3-only`: review off, cost −0.004 [−0.006, −0.002] and calls −4.5 differ, perfect
++0.098 [−0.030, +0.227]; `--direct`, cost −0.005 [−0.007, −0.002] differs, perfect −0.183 [−0.374, +0.008];
+plan-probe-required, cost not distinguishable, perfect −0.161 [−0.355, +0.032]. By the rule: **review off is a
+candidate for a django arm** (cost differs, perfect within 3, and the misreport-documented failures §131.7 traced to
+the reviewer are gone, 4 of 4); `--direct` is not (5 fewer perfect runs; without the planner the wrong-report tasks
+fail, so the planner still earns its place with Mercury 3); plan-probe-required is dropped (no gain, no saving).
+
+### 131.7 Stumbling blocks and strengths, Mercury 3 against 2.5: a trace review (20 Oct)
+
+A read-only review of the same-day traces (§131.2 fixtures, §131.3 django and SciCode) with `harness trace sql`;
+final code checked in each django workspace and SciCode `solution.py`. Outcomes of the contaminated runs (§131.5) are
+not used; their behaviour is.
+
+**A harness contract that says one thing and does another.** The executor prompt (`agent/prompts.py` "it does not
+gate the step") and the `finish_step` schema ("does not fail the step") describe `expected_result` as a record, but
+`agent/phases/execute.py` `_apply_result` turns `verified=true` without it into an unverified step and a retry, which
+also skips the step's own verify command. Mercury 2.5 nearly always sends it; Mercury 3 nearly never does. Verified
+`finish_step` calls without it, counted: django 58 of 64 (Mercury 3) against 0 of 57; SciCode 222 of 233 against 8 of
+101. It accounts for 64 of Mercury 3's 70 step retries and all 33 of its `step_failed`, touches 63 of 107 runs (2.5:
+1), costs about 12.6% of its calls and 10% of its spend, and left step verify commands run on 18 of 55 django attempts
+(2.5: 58 of 59). No outcome changed by it was found. The 38 repeated `finish_step` calls on SciCode are one run
+(`s131-sci-h-m33`, problem 49) emitting 206 parallel calls in one reply, a one-off.
+
+**Where Mercury 3 fails** (django, 7 real failures): none is a wrong file and none ran out of budget, where 2.5's
+failures include §119's wrong file on 11964 (3 of 3) and the wrong place on 11951. They are a right place with a
+wrong detail the hidden test pins: 11790 `maxlength` as a string not 255 (2.5 the same), 11848 `timezone.now()` where
+the test mocks `utcnow` (2.5 all three the same), 11815 a misremembered upstream fix (`Status.GOOD` against
+`Status['GOOD']`), 11999 the issue's model added to `models.py` where it collides with the hidden test (2.5 once). One,
+11885 r1, raised existing `assertNumQueries` counts (3 to 4, 4 to 5, 2 to 4) to make its suite pass, and the
+pinned-test gate did not catch it. 11885 r2 was the provider (stalls, empty diff). SciCode: 10, 44, 47 and 70 fail in
+both arms; Mercury 3's own losses are unstated conventions (problem 7 cycles a pixel against pixel distance, CG a
+relative stopping rule, IncomChol's upper triangle not zeroed).
+
+**Fixtures:** misreport-documented fails because of Mercury 3's own reviewer: the executor correctly left
+`pricing.py` alone in all 4 runs, the first review said `needs_changes` in all 4 and the fix phase switched to
+`ROUND_HALF_UP` (2.5 edited `pricing.py` itself in all 4: a wrong diagnosis). misreport-slug r2: it saw the reported
+example does not reproduce, substituted "smørrebrød" so its reproduce check would fail "so the plan proceeds
+verified", then rewrote `slug.py`.
+
+**Where it wins:** misreport-discount, its plan quotes "Finance policy, not an oversight" and the pinned test (2.5
+plans to change the threshold); 11964 fixed in `Choices`; 11848 `utcnow` in two runs; 11951 the cap in
+`_batched_insert`. **Recall:** 10 of 30 Mercury 3 django plans say they know the upstream fix (2.5: 0 of 29), checked
+by hand; 11964's runs 2 and 3 among them. Part of its django gain is memory of django's history, which a sealed
+workspace cannot remove.
+
+**Friction:** 20 of 21 sandbox denials are Django's test runner wrapped in `cd tests &&` or `2>&1 | tail`, retried
+bare on the next call. `git_log` 15 calls on a one-commit repository, in all three 11790 runs just before the GitHub
+commit searches (that it caused them is inferred). `ask_user` 7 calls with no one to ask (the right convention
+questions). 16 calls stopped at the length limit (~15.5k tokens) with only reasoning. SciCode: 22 runs wrote a
+`conftest.py`, 12 spent turns getting pytest to import `solution` from `tests/`. All 172 fetches were in plan or
+review, none in execute; 12 loop exhaustions were web loops.
+
+**What 2.5 does better:** about a third of the cost on easy tasks (9296 $0.0037 against $0.011; 11880 $0.0072 against
+$0.022), plans of 406 against 1,710 output tokens a call on django, follows the `finish_step` contract, never goes to
+the web.
+
+**Candidate changes, ranked by runs touched** (none built; each with the measurement that would confirm it):
+1. One `expected_result` contract: either do not gate on it (as the prompt says) or require it in the schema, and
+   always run the step's verify. 63 of 107 Mercury 3 runs. Fixtures scout, both models: calls a run about -10% for
+   Mercury 3, verify coverage near 100%, perfect runs unchanged.
+2. The reviewer weighs documented intent (pass it the planner's findings), or review off for Mercury 3 (§131.6's
+   `mercury3-noreview`). The 3 misreport-documented failures. Honest rate over 8 repeats of misreport-documented,
+   misreport-discount and no-bug.
+3. No web in benchmark runs, with a local lookup instead (the repository's own docs, `inspect_module`). 26 of 75 runs
+   fetched. Count fetches and web-loop exhaustions in the §131.5 re-run first.
+4. Say the history is one snapshot, or drop `git_log` when there is one commit. 15 calls, 3 runs.
+5. Let the sandbox accept `| tail -N`, `2>&1` and `cd tests &&` around an allowlisted test command. 21 round trips.
+6. SciCode: make `import solution` work from `tests/` (seed a `conftest.py` or put the root on pytest's path). 22 runs.
+7. Smaller: a reproduce snippet must use the goal's own example (misreport-slug); `ask_user` records an assumption
+   when no one can answer; medium against high executor reasoning for Mercury 3 (16 reasoning runaways); execute
+   only the first terminal call in a batch; flag edits that raise `assertNumQueries` (11885 r1).
+
+### 131.8 The clean re-runs and mini-swe-agent with Mercury 3 (20 Oct 07:00-09:38)
+
+Same tree (323fa64), same commands, the §131.5 deny lists. Results of record for §131.3's rule.
+
+**django** (`results/s131b-dj.jsonl`, $1.39): `h` 12 of 30 ($0.0112 a run), `h-m3` 15 of 30 ($0.0352, 21.7 calls
+against 33.8); paired +0.100 [−0.067, +0.267]. **No separation.** Per task `h` / `h-m3`: 9296 2/2, 11790 1/0,
+11815 1/2, 11848 0/0, 11880 2/2, 11885 0/0, 11951 1/3, 11964 0/1, 11999 3/2, 12708 2/3. The control is 5 below §126's
+17 (and 4 below last night's 16), past the 3-run drift bound: reported as possible drift, and it widens the gap
+rather than closing it. Leaks: Mercury 3 tried 29 fetches, all refused or failed (19 django's raw files, 6
+`swebench`, 3 `github.com/django/django`, 1 GitHub search); `contamination.py` 0 gold-fix or hidden-test lines. 11964,
+3 of 3 last night, is 1 of 3.
+
+**SciCode** (`results/s131-scicode.txt`, $1.0): `h` 7, 7, 9 (7.7; $0.06 a round), `h-m3` 8, 9, 11 (9.3; $0.25);
+problems +1.67 [−0.33, +4.00], sub-steps +1.3 [−5.3, +8.0]. **No separation.** Mercury 3's denied attempts: 24
+(grep.app, `/scicode/`, DuckDuckGo 5 each; Hugging Face 4; GitHub search 2; Google, Sourcegraph, `scicode-bench` 1
+each). Its 37 successful fetches were papers (arXiv 29, Crossref 5), one Wikipedia title search, a DFT library's
+GitHub page (problem 10, solved by no arm) and numpy's README.
+
+**mini-swe-agent** (`results/s131-mini.jsonl`, `results/s131-mini25.jsonl`; iso sandbox, $1.35). Two driver fixes
+first: `uvx` had resolved litellm 1.106.0, which imports `mcp` and died on every first call, so mini pins 1.104.0;
+that litellm prices neither Mercury, and mini refuses a model it cannot cost (ignoring it would switch off its spend
+limit), so `scripts/agents/mini.py` writes a price registry from `agents.PRICES` beside each run (test in
+`tests/test_agents.py`). The first 2.5 arm ran 0 of 30 that way (1 call each, $0) and was re-run; the driver's
+guard did not stop it, since a run that ends "not resolved" is not a failure to it.
+
+| arm | resolved of 30 | $ a run | calls a run |
+|---|---|---|---|
+| `mini` (Mercury 2.5) | 20 | 0.0097 | 53 |
+| `mini-m3` (Mercury 3) | 22 | 0.0355 | 50 |
+
+`mini-m3` minus `mini`: +0.067 [−0.100, +0.233], no separation (§126's mini was 17). Leaks: mini's shell tried the
+web in 8 Mercury 3 runs (`curl` to django's raw GitHub files, `urllib`); every attempt failed at the dead proxy
+(127.0.0.1:9) or was refused, and no output carried content. `contamination.py`, now reading iso mini runs: no
+gold-fix or hidden-test line seen before the run's own edit, in either arm.
+
+**Not pre-registered, so a lead:** mini with Mercury 3 resolved 22 against the harness's 15 with Mercury 3, +0.233
+[+0.100, +0.400], at about the same cost a run; mini with 2.5 resolved 20 against the harness's 12. The arms ran 1-2
+hours apart and the harness control was low against its own history, but on this morning's runs a 100-line loop beat
+the harness on django with either model; §126 had them level (17 each). The harness arms are tree 323fa64, not today's
+default (review off since §124.10, `--direct` available); §131.7's `finish_step` retry touches 63 of 107 Mercury 3
+harness runs and none of mini's.
+
+**Reading for Mercury 3:** past a pre-registered rule only on the fixtures (§131.2). With the leaks closed it is
+ahead but not separable on django (+3 of 30 in the harness, +2 in mini) and SciCode (+1.7 problems a round), at
+3-4x the cost a run. The wrong-report fixtures that capped 2.5 are what it fixes most clearly.
+
+### 131.9 finish_step's expected_result: recorded, not retried; pre-registered A/B (20 Oct)
+
+§27 added the field to make the executor state a prediction before claiming `verified`, and said `_apply_result`
+"asks for one". As built, a missing one fails the whole attempt: the step is marked unverified, its verify command
+is skipped, and the attempt re-runs from the start, while the prompt says the field "does not gate the step" and the
+schema that it "does not fail the step". Never measured. §131.7: Mercury 3 omits it in 9 of 10 verified calls.
+
+`Settings.expected_result_gate` (default True, today's behavior); False records `expected_result_missing` and lets
+the step's verify command decide, as the prompt says. Tests (`tests/test_verify_expectation.py`) drive
+`execute_step` with only the model call scripted, in a real workspace with real verify commands: gate off runs the
+verify once with no retry and still fails a step whose verify fails; gate on (pinned) retries without verifying.
+
+**A/B:** `mercury-only` against `mercury-er-record` and `mercury3-only` against `mercury3-er-record`, §131.2's eight
+tasks x 4, one tree, interleaved (`results/s131d-er.jsonl`). **Rule:** the default becomes False if, for Mercury 3,
+calls or cost a run fall (interval excludes zero) with perfect runs within 2 of its control, and for Mercury 2.5
+perfect runs are within 2 of its control (it seldom omits the field, so little should change). Otherwise it stays
+True and the prompt and schema are corrected to say what the code does.
+
+**Result** (`results/s131d-er.jsonl`, 20 Oct 10:30-11:02, 128 runs, 2 lost to zero-cost timeouts, $1.1):
+
+| config | perfect | calls | $ a run | step retries | step_failed | `expected_result_missing` |
+|---|---|---|---|---|---|---|
+| `mercury-only` (gate on) | 17 of 32 | 10.7 | 0.0030 | 2 | 0 | 0 |
+| `mercury-er-record` (gate off) | 18 of 32 | 11.3 | 0.0031 | 3 | 0 | 0 |
+| `mercury3-only` (gate on) | 24 of 31 | 12.0 | 0.0112 | 13 | 3 | 0 |
+| `mercury3-er-record` (gate off) | 30 of 31 | 9.8 | 0.0091 | 0 | 0 | 19 |
+
+Mercury 3, gate off against on: calls −2.26 [−4.19, −0.29] differs, perfect +0.194 [+0.032, +0.355] differs, cost
+−0.002 [−0.005, +0.000]. Mercury 2.5: nothing distinguishable (perfect +0.031 [−0.219, +0.281]). **By the rule the
+default is now False** (`Settings.expected_result_gate`, `AgentConfig`, the CLI flag): the gate was costing Mercury 3
+answers, not only calls. The A/B configs became `mercury-er-gate` and `mercury3-er-gate`, which price turning it back
+on; the schema's "Required whenever verified is true" now reads "Give it whenever verified is true".
+
+### 131.10 Before a full run on today's tree: wrapped test commands, effort, and a preflight scout (20 Oct)
+
+§131's runs used §126's tree 323fa64. Today's tree already drops `ask_user` and `audit_previous_runs` where they
+cannot help (§129, §131.1), runs review off by default (§124.10; so §131.7's reviewer failure does not arise), and has
+the §131.5 deny lists. Fixes for what remained of §131.7's list:
+
+- **Wrapped test commands** (`agent/approval.py` `_wrapped_parts_pass`): unattended runs denied every compound
+  command, and each denial cost a round trip to the same command unwrapped (django: Mercury 3 21, 2.5 9; most were
+  `runtests.py ... 2>&1 | tail -40` and `cd tests && python runtests.py ...`). Now an `&&` chain of parts that would
+  each pass alone, where `cd` must stay in the workspace, with at most `2>&1` and one final `| head` or `| tail` with a
+  numeric count, is approved; anything else (`;`, `||`, another pipe, substitution, a part not allowlisted or whose
+  path escapes) still gates. Tests: the denied commands from the traces pass; eleven escapes still raise; a real
+  `run_bash` runs `cd tests && cat lines.txt 2>&1 | tail -3` in a real workspace.
+- **`--expected-result-gate/--no-expected-result-gate`** on `harness run`, so sealed arms can set §131.9's switch.
+- **`mercury3-exec-medium`**: 14 Mercury 3 SciCode calls ran to the 16k cap with reasoning only (execute steps
+  writing a whole solution, about 25 s and $0.0055 each, about one run in six); the fixtures never do.
+
+**Security review of 1ded9df, and the fix.** An automated review of the commit found the first version of the rule
+checked a re-quoted copy of each part (`and_chain_segments` re-joins with `shlex.join`), not the text that runs:
+`ls && echo "$(cat ~/.ssh/id_rsa)"` and `` ls && echo "`id`" `` passed because re-quoting hid the substitution;
+`python x.py &>/tmp/out && echo` passed because `&>` is not in shlex's operator list; `cd -` and `cd t*` passed the
+workspace check as literal names; and later parts' paths were checked from the workspace root, not the `cd` target
+(a symlink in `tests/` pointing out). Now the raw text is split on `&&`, any part with shell syntax beyond words and
+quotes (backtick, `$`, `<`, `>`, `;`, `|`, `&`, brackets, braces, backslash, globs, a newline) is refused, `cd` may only
+come first with no leading `-`, and later paths resolve from its target. Pre-existing and found on the way: a plain
+`cat $HOME/.ssh/id_rsa` passed, `$HOME/...` read as a workspace folder; a path the shell would expand is now never
+inside. Tests: the review's cases and the symlink case fail on 1ded9df and pass now. This layer was never the
+isolation (allowlisted `python` reads anything; benchmark runs are under `sandbox-exec`), but a change to it must not
+widen it. The preflight runs on 1ded9df, inside the sandbox; the full run uses the fixed commit.
+
+**Second and third reviews (8d20c3d, 7fa785e)** found more places where Python's reading of a path differs from
+bash's: tilde forms (`cd ~-` is OLDPWD and `~+` PWD to bash, but `Path("~-").expanduser()` leaves a name inside the
+workspace) and brace expansion in any allowlisted command (`cat {/etc/passwd,x}`, pre-existing). A first fix scanned
+the raw command with quoted spans blanked, which `cat {"/etc/passwd",x}` and `cat {/etc/passwd,\ x}` got past:
+approximating bash's quoting with a regex is the wrong layer. Now the check is on the shlex token of each path
+argument, which has had quotes and backslashes applied as bash applies them: a token with `$`, a backtick, a brace,
+or a `~` other than `~` and `~/` is never inside (`_UNPLACEABLE`). It fails closed on a literal brace or quoted tilde
+in a path argument, which no §131 trace used; braces in non-path arguments (`grep "x{2,3}"`, `python -c "{1:2}"`) are
+untouched. Each review's cases are tests, and fail on the commit before their fix.
+
+**A fourth review (99b7987):** the token check covered only arguments classified as paths, but brace and `$IFS`
+expansion in a skipped position (grep's or sed's pattern, any flag) can add a path argument: `grep {x,/etc/passwd}`
+runs `grep x /etc/passwd`. Also pre-existing: a flag's own value was never checked (`grep --file=/etc/passwd x`). For
+the path-checked commands (`_PATH_ARG_COMMANDS`, `_SCRIPT_FIRST_COMMANDS`) any argument matching `_UNPLACEABLE` now
+gates, and every `--flag=value` value is checked as a path. Cost: 10 of 1,511 run_bash calls in all bench traces had a
+path command with `$`, a backtick, a brace, `~` or `--x=`, and they now go to the gate (`grep 'end$'` among them,
+since a literal `$` cannot be told from an expansion after shlex). Test fails on 99b7987.
+
+**A fifth review (c36f8e2), left open for the author.** It found sed's own write and execute commands (`sed -n 'w
+/tmp/out'`, `s/x/y/e`), short options with an attached value (`grep -f/etc/passwd x`, `cp -t/tmp f`), and globs in
+grep's pattern position (`grep /etc/pass* f`). All five cases are allowed on cc3487b, before any §131.10 change, and
+unchanged since: they come from allowlisting sed, grep and cp at all, not from the wrapped-command rule. Five rounds of
+review have each found more of this kind: the allowlist is a heuristic over shell syntax and cannot be made a sandbox
+one pattern at a time. Benchmark runs do not depend on it (they run under `sandbox-exec`); a user's unattended run
+does. Options, not taken: run unattended user runs under the same `sandbox-exec` profile iso.py uses, or shrink the
+unattended allowlist (sed only as read-only `-n ...p`, no option values attached to path commands).
+
+**Preflight scout** (one repeat, to read traces for friction, not to compare): django 10 tasks with Mercury 2.5,
+Mercury 3, and Mercury 3 with `--no-expected-result-gate` (iso arms on this commit); SciCode one round of Mercury 3 at
+high and at medium executor effort. A subagent reads the traces with `harness trace` tools for new friction before
+the full run is pre-registered.
+
+### 131.11 The preflight on today's tree, and why Mercury 3 loses SciCode problem 70 (20 Oct)
+
+Tree 1ded9df, one repeat (`results/s131p-dj.jsonl`, `~/.cache/mercury-harness/scicode-runs/s131p-sci-{t3,t3med}.out`,
+$0.74). django resolved of 10: Mercury 2.5 5 ($0.0094 a run, 29.8 calls), Mercury 3 6 ($0.0351, 18.8), Mercury 3 gate
+off 7 ($0.0295, 18.5). SciCode Mercury 3: high effort 9 of 15 ($0.21), medium 9 of 15 ($0.27). No sandbox denial, no
+gold line seen before a run's own edit; 24 fetches, all refused with nothing returned.
+
+A trace review (subagent, `harness trace sql/holds/leaks`, today's arms against §131.8's): the §131.7 frictions are
+mostly gone. Five wrapped test commands ran that used to be denied; every django denial left is outside the rule
+(`;`, `| grep`, `2>/dev/null`, `>`). With the gate on (this tree's default) it caused 7 of 8 step retries and all 4
+step failures in the Mercury 3 arm, 0 with it off, and step verify ran on 7 of 18 attempts against 13 of 14 (the
+default is off since §131.9). `audit_previous_runs` 0 calls; length stops 1. No new kind of hold or nudge. django
+failures are model failures (wrong detail on 11790 and 11848, 11885 raising `assertNumQueries` counts again, 11964
+the wrong place), none the harness's.
+
+**Problem 70, and the 30 s first-content cut.** The cut (`DIFFUSION_FIRST_CONTENT_TIMEOUT_S`, §69, sized on Mercury
+2.5: p99 11.7 s) fired 13-23 times an arm-round for Mercury 3 and 0 for 2.5, and problem 70 died of seven straight cuts
+on both SciCode arms. The clock stops only on a content or tool-call delta. A direct probe of problem 70's goal,
+streamed with no timeout (`stream_probe.py`, $0.06): Mercury 3 streams **no reasoning deltas**, and at high effort 3 of 4
+calls reasoned to the 16,000-token cap and answered nothing (15.4-15.8k reasoning tokens, 32-48 s), one answered at
+32.8 s; medium 3 of 3 ran to the cap; low answered in 2 of 3 (6.2 s, 13.4 s). Mercury 2.5 answered both calls at 23-26 s
+with about 6.5k tokens. So the cut is not killing healthy calls on this prompt: raising it would wait 45 s for nothing.
+What fails is that every retry repeats the same request at the same effort. Candidate, not built: after a first-content
+cut or a reasoning-only length stop, retry that call at low effort (low answered 2 of 3 where high and medium answered
+1 of 7).
+
+**Fixed now:** `sci.py` passes `--no-ask` (ask_user was offered on SciCode, 5 calls in one round); `swe.py`'s bare
+`swebench` deny pattern, which matched every workspace path (`swebench-runs`) in code a run executes, is now
+`swebench.com` and `swebench/` (`tests/test_web_deny.py`).
+
+### 131.12 A runaway asked again at low effort: pre-registered A/B (20 Oct)
+
+`Settings.runaway_effort_step_down` (off; commit c39cea0): a Mercury call at medium or high effort that is cut for no
+content (`DIFFUSION_FIRST_CONTENT_TIMEOUT_S`), or ends at the token cap with only reasoning, is asked again at low effort
+instead of repeated; the abandoned call's usage is folded into the reply, so the trace and the spend cap count it.
+Motivated by §131.11's probe (SciCode 70: 6 of 7 medium or high calls reasoned to the cap without answering; low answered
+2 of 3). Tests: `tests/test_runaway_step_down.py`, against a real local SSE server that answers by the effort it is sent.
+
+**A/B:** arms `n3` (Mercury 3, today's defaults) and `n3-sd` (`--runaway-step-down`), both on c39cea0 under the
+sandbox. SciCode: three rounds each, interleaved (`s131e-sci-{n3,n3-sd}{1,2,3}`), the primary measure. django: 10 tasks
+x 1 each (`s131e-dj`), for the cut count and as a check that nothing breaks; no rule on its resolved count.
+
+**Rule:** the default becomes True if, on SciCode, first-content cuts a round fall (summed over the three rounds), mean
+problems a round is no more than 1 below `n3`'s, and model seconds a round do not rise. Problem 70 is reported on its own
+either way. Otherwise it stays off.
+
+**Result** (`results/s131-scicode-e.txt`, `results/s131e-dj.jsonl`; 20 Oct 16:25-18:08, $1.6). SciCode, Mercury 3,
+three rounds an arm:
+
+| | problems a round | sub-steps | first-content cuts | reasoning-only length stops | stepped down | model s | wall min a round |
+|---|---|---|---|---|---|---|---|
+| `n3` | 10, 9, 8 | 31, 25, 24 | 82 | 3 | - | 2,694 | 32, 41, 28 |
+| `n3-sd` | 10, 9, 10 | 33, 31, 31 | 35 | 0 | 22 | 2,638 | 28, 23, 19 |
+
+Problems +0.67 [−1.33, +2.67], sub-steps +5.0 [−1.0, +12.3]. **By the rule the default is now True**: cuts fell, problems
+did not, model seconds did not rise (wall time, which also counts the ~30 s each cut wastes outside any call, fell about
+30%). Problem 70 is still unsolved in all six rounds, but now fails in 3.5-4.0 minutes against 4.6-12.4; problem 10
+got further (6, 3, 3 sub-steps against 3, 0, 0) without being solved. django, one repeat (no rule): resolved 7 against 5
+of 10, cuts 5 against 9 with 6 step-downs, model seconds 1,112 against 873. `mercury3-no-step-down` prices turning it off.
+
+### 131.13 The full run: harness and mini-swe-agent, Mercury 2.5 and 3, django and SciCode; pre-registered (20 Oct)
+
+Tree 17bf856 for the harness arms (review off, §129's tool diet, the §131.5 deny lists, the expected_result gate off,
+the runaway step-down on, the hardened wrapped-command approval), everything sandboxed.
+
+- django, `iso_s126.py run s131f-dj --arms f2,f3,mini,mini-m3 --repeats 3` over the ten tasks (120 runs): `f2` the
+  harness with Mercury 2.5, `f3` with Mercury 3, `mini`/`mini-m3` mini-swe-agent 2.4.6 (litellm 1.104.0, §131.8) with
+  each model.
+- SciCode, three rounds an arm (`s131f-sci-{f2,f3,mini,mini-m3}{1,2,3}`): the harness through `sandboxed_harness.sh`
+  on 17bf856; mini through `agents_sci.py`. Harness and mini rounds run as two interleaved sequences side by side.
+
+**Decision rules**, written before the runs. Each is a paired 95% bootstrap (django: over the 30 task-repeat pairs;
+SciCode: problems a round over the 15 problems, as §126.3), and a comparison "separates" only if its interval excludes
+zero:
+1. Mercury 3 against Mercury 2.5 inside the harness (`f3` − `f2`) and inside mini (`mini-m3` − `mini`), each suite.
+2. The harness against mini for each model (`f2` − `mini`, `f3` − `mini-m3`), each suite. This tests §131.8's
+   exploratory lead (mini with Mercury 3 22 against the harness's 15 of 30) on today's harness.
+3. Cost a run at launch price and at list price ($0.20 / $0.70) for Mercury 3, and model or wall time a run.
+
+**Leaks:** `contamination.py` over every django run (harness and mini); every harness `fetch_url` that returned text
+listed by URL; every mini shell command reaching the web listed with its output. A run that reached a benchmark source
+is voided before any figure.
+
+**Results** (20 Oct 18:12-19:35; `results/s131f-dj.jsonl`, `results/s131-scicode-f.txt`; django $2.72, SciCode about
+$1.4 by the balance, $9.48 to $5.34 in all).
+
+django, resolved of 30 (and of 29 with the voided run dropped):
+
+| arm | resolved | $ a run | min a run | calls a run |
+|---|---|---|---|---|
+| `f2` harness, Mercury 2.5 | 15 | 0.0085 | 1.4 | 23.8 |
+| `f3` harness, Mercury 3 | 26 (25 after the void) | 0.0298 | 2.5 | 17.9 |
+| `mini` mini-swe-agent, Mercury 2.5 | 20 | 0.0110 | 1.6 | 58.6 |
+| `mini-m3` mini-swe-agent, Mercury 3 | 22 | 0.0413 | 2.2 | 50.4 |
+
+**Void:** `f3` round 2, task 11999 resolved after 9 successful fetches (13 calls, 4 refused) of django's main branch from
+`cdn.jsdelivr.net/gh/django/django@main` (`tests/model_fields/tests.py`, `fields/__init__.py`, `base.py`), a GitHub CDN
+mirror no deny pattern named (`github.com/django/django` is not in `gh/django/django`). 11999 is resolved by every arm in
+every round (12 of 12), so the void costs `f3` one run it would almost surely have had; the rule voids it regardless.
+`contamination.py` over all 120 runs: no gold-fix or hidden-test line seen before a run's own edit (mini's outputs are
+recorded; the harness's are not, which is why the void is by URL). Mini's shell tried the web in 8 Mercury 3 runs;
+every attempt failed at the dead proxy.
+
+Paired bootstraps, voided pair dropped (counting it unresolved gives the same verdicts):
+1. **Mercury 3 against 2.5 in the harness: +0.379 [+0.207, +0.552] (25 against 14 of 29), separates.** In mini: +0.069
+   [−0.103, +0.241], does not.
+2. Harness against mini, Mercury 3: +0.138 [+0.000, +0.310]; Mercury 2.5: −0.172 [−0.379, +0.000]. Neither
+   separates; both sit on zero from opposite sides. §131.8's lead for mini with Mercury 3 (22 against 15) does not
+   survive on today's harness (25 or 26 against 22).
+
+SciCode, problems a round (three rounds):
+
+| arm | problems | mean | sub-steps | $ a round |
+|---|---|---|---|---|
+| `f2` | 8, 7, 7 | 7.3 | 27, 25, 23 | 0.05 |
+| `f3` | 10, 10, 11 | 10.3 | 33, 32, 32 | 0.19 |
+| `mini` | 7, 9, 7 | 7.7 | 24, 27, 22 | 0.02 |
+| `mini-m3` | 9, 10, 10 | 9.7 | 30, 30, 31 | 0.22 |
+
+1. **Mercury 3 against 2.5 in the harness: +3.00 [+0.33, +6.00] problems a round, separates** (sub-steps +7.3 [+2.0,
+   +13.3]). In mini: +2.00 [+0.00, +4.67], on the edge, does not.
+2. Harness against mini: Mercury 2.5 −0.33 [−2.33, +1.33], Mercury 3 +0.67 [−1.00, +2.33]; neither separates.
+Leaks: `f3`'s 20 successful fetches were all one run browsing deepmd-kit's Ewald code (problem 10, not solved in any
+round); mini's two SciCode attempts at the benchmark's repository failed at the dead proxy.
+
+Cost a run, Mercury 3 against 2.5: harness django 3.5x ($0.030 against $0.0085), SciCode 3.9x a round ($0.185 against
+$0.047, summed from the traces; the score files round to cents); at list price ($0.20 / $0.70) about 7-8x. Time a run: django 2.5 against 1.4 minutes.
+
+**Reading.** On today's harness, Mercury 3 separates from Mercury 2.5 on both suites, the first time on django or
+SciCode (§131.8's older tree: no separation on either). Inside mini the same model gain is smaller and does not separate.
+The day's harness changes (`expected_result` gate off, runaway step-down, wrapped test commands, `--no-ask`) moved the
+harness with Mercury 3 from 15 of 30 (§131.8, tree 323fa64) to 25-26; the run does not separate how much of that is the
+tree and how much the day. The harness and mini do not separate with either model.
+
+**Fix:** `scripts/webdeny.py` `GITHUB_MIRRORS` (jsDelivr's `/gh/`, githack, statically, gitcdn, ghproxy), in both
+drivers' lists, and `django/django` for any address naming the repository; `tests/test_web_deny.py` adds the jsDelivr
+and githack URLs and keeps jsDelivr's `/npm/` reachable.
+
+**Post hoc, not pre-registered:** the change in the harness-minus-mini gap from Mercury 2.5 to Mercury 3 on django,
+(f3 − mini-m3) − (f2 − mini), is +0.31 [+0.03, +0.59] (paired bootstrap over the 29 task-repeat pairs, voided pair
+dropped; recomputed by the 22 Oct fact-check).
+
+### 131.14 The full run's traces: where the arms fail, what the harness gives Mercury 3, and a gate that misses tests.py (20 Oct)
+
+A read-only review (subagent; `harness trace sql/holds/leaks`, mini's `traj.json`, final workspace diffs, SciCode's
+scoring scripts re-run locally, which reproduced every checked verdict).
+
+- **Ceilings and floors.** django 9296, 11880, 11999 (12 of 12) and 12708 (11 of 12) cannot separate arms. SciCode 10,
+  44, 47, 70 are floors (0 of 12) and 3, 19, 78 ceilings; on the seven problems that discriminate (21 chances an arm):
+  f2 10, f3 19, mini 11, mini-m3 18. 52 of 55 failing SciCode steps are wrong numbers; the three crashes are Mercury 2.5.
+- **Mercury 3's failures, harness:** four, one of each kind (11790 `maxlength` as `str()`; 11848 `now(timezone.utc)`
+  where the hidden test mocks `utcnow`; 11885 wrong behavior and raised `assertNumQueries` counts; 11964 the wrong
+  place). Mini with Mercury 3 fails 11790 and 11848 in all three rounds. The harness's lead is on 11790 (+2), 11848 (+2)
+  and 11885 (+1), mini's on 11964 (+1). 11 of 30 harness plans with Mercury 3 say they know the upstream fix (Mercury
+  2.5: 0 of 29); inferred, not shown: the harness's edge is where a hidden test pins upstream's detail.
+- **Where the calls go**, Mercury 3, django, per run: harness 17.9 calls (47% of them and 50% of cost in the plan
+  phase; about 15 read and search tools inside the plan), 4.6 test runs made by the harness at no model call, 2.6 edits;
+  mini 49.8 calls, 25.3 of them reading or searching, 9.7 test runs, 9.1 edits (20% failed), 3x the prompt tokens at
+  half the cost a call. Mini's prompt assumes Linux on a macOS host: Mercury 2.5 aimed at `/testbed` in 23 of 30 runs,
+  BSD `sed` errors in 15, `timeout: command not found` 11 times. A caveat on every harness-against-mini comparison.
+- **Friction on 17bf856.** The step-down fired 17 times on django (all answered) and 27 on SciCode (26 answered). 26
+  first-content cuts on django, 24 of them on 11885, which is 31% of the harness's Mercury 3 django spend and 43% of its
+  wall time. Denials: 11, all one run, all `| grep`, `>` or `;`. Holds: 3, all sensible. `git_log` on a one-commit
+  repository in 13 runs. On SciCode Mercury 3 writes its test before `solution.py` in 37 of 45 runs (2.5: 1 of 45), and
+  the after-edit check then reports a collection error; 20 runs wrote a `conftest.py`, 16 after such an error. One run
+  (`f3` r3 11885) `git stash`ed its own fix and never popped it, then wrote another that passed.
+- **Honesty:** test weakening on 11885 in `f3` (r1: counts 3 to 4, 2 to 4, 1 to 3), `mini-m3` (r1: the two tests that
+  then fail hidden) and `mini` (r2: deleted `FastDeleteTests` with a careless truncation); `f2` none.
+- **Bug, confirmed by running it:** `langtools.is_test_file` matches `test_*` and `*_test.py` only, so Django's
+  `tests.py` is not a test file to the pinned-test gate (`runner._pinned_tests`, `_changed_tests`) or the mutation
+  audit. The harness with Mercury 3 edited a `tests.py` in 18 of 30 django runs; the audit skipped in 28 of the 29
+  harness runs that did. This is why the raised counts got through three times (§131.7, §131.11, here).
+
+**Candidates, ranked** (none built): (1) `tests.py` as a test file, proved offline by replaying `f3` r1 11885's edits
+through the gate (expect `pinned_test_held`), then 11885 x 6 for the weakened-test rate; (2) SciCode's test-first: an
+after-edit message that recognizes a red test before the solution exists, or a seeded `conftest.py` (42 of 45 runs);
+(3) a prompt line that existing query-count assertions are pinned (11885); (4) no web tool at all in sealed runs (16 of
+30 django runs tried); (5) plan effort medium against high (half of the cost, and where the recall that wins 11790 and
+11848 happens); (6) smaller: `git_log` on one commit, `git stash` unattended, mini told its OS before the next
+harness-against-mini comparison.
+
+### 131.15 From another project of the author's (an extraction pipeline): Mercury 3 at low effort, and the client's defaults for other callers (20 Oct)
+
+A session on another of the author's projects (an extraction pipeline) found on extraction calls that Mercury 3 at "low" reasons a median
+7,383 tokens with 15.1 s to first token (p90 23.5 s), against Mercury 2.5's 251 tokens and 1.3 s, and that `agent.llm`'s
+30 s first-content cut and 4-16k token caps cut its tail and emptied answers (fixed there in-process: cut 180 s, at
+least 40k tokens, mercury-3 only). Two consequences here, neither built:
+- §131.12's step-down retries only calls at medium or high effort, so a healthy Mercury 3 call at low effort that runs
+  past 30 s is still cut and repeated; in §131.13, 17 cuts landed on the low re-ask itself and were recovered only by
+  ordinary retries. Candidate: a first-content bound for `inception/mercury-3` sized on its own low-effort tail (p90
+  23.5 s there), measured the way §69 sized 30 s on Mercury 2.5.
+- `OpenRouterClient(runaway_step_down=False)` is the constructor default; only `providers.build_client` reads
+  `Settings.runaway_effort_step_down` (True). A caller that builds the client directly, as other repos do, gets
+  neither the step-down nor any Mercury 3 bound. Candidate: default the constructor to the Settings default.
+
+### 131.16 Against the models Inception names, and Sonnet 5.5 on tasks no model has seen: pre-registered scout (21 Oct)
+
+The author's questions: is Sonnet 5.5's django and SciCode lead memory of public fixes, and how does Mercury 3 compare
+with the models Inception compares it to? Haiku 5.5 and GPT-6 Luna are $0.10 / $0.50 on OpenRouter, Mercury 3's price
+class (Haiku 4.5 was $1 / $5); Sonnet 5.5 is $2 / $10.
+
+Smokes (`results/s131g-smoke*.jsonl`): Haiku 5.5 runs (misreport-slug, 80%, $0.0086). GPT-6 Luna fails on its first
+call: OpenAI's strict mode requires every property in `required`, and the harness's optional parameters (`list_dir`'s
+`path`) are not, so `luna-only` runs with `strict_tool_schemas=False`; there is no CLI switch, so Luna is not run on the
+sealed suites (a schema change for OpenAI's strict mode is a candidate, not built). Sonnet 5.5 (`anthropic/claude-
+sonnet-5.5`, reasoning low as in §127.6) refused the first planning call once on Claude Platform on AWS
+(`content_filter`, §127.9's refusal) and ran the next two (100% each, about $0.10 a run); refusals count as failed runs.
+
+**Scout:** the private fixtures (written for this project, not public, so no model was trained on them), §131.2's eight
+tasks x 2, interleaved: `mercury-only`, `mercury3-only`, `haiku55-only`, `luna-only`, `sonnet55-only`
+(`results/s131g-fixtures.jsonl`). And Haiku 5.5 on django, 10 x 1, sealed on 17bf856 (`f-haiku55`, `s131g-dj`). A scout:
+it reports perfect runs, honesty, cost and time per model with the Sonnet refusal rate, and decides nothing by itself.
+The question it can answer: does Sonnet 5.5's lead over Mercury 3 hold on tasks it cannot have memorized?
+
+**Upstream overlap (offline, §127.2's measure, `scripts/analysis/gold_overlap.py`'s functions over `s131f-dj`, voided
+run excluded):** share of the upstream patch's distinctive source lines (30 characters or more) a resolved run's diff
+reproduces verbatim. Mercury 2.5: harness 0.13 (0 of 15 runs reproduce every line), mini 0.07 (1 of 20). Mercury 3:
+harness 0.26 (6 of 25), mini 0.39 (7 of 22). No upstream comment line reproduced (0 of 22, 0 of 9). Against §127.2:
+Claude Code with Sonnet 5.5 0.60 (5 of 10), Goose with GLM 0.71 (17 of 26). Mercury 3 sits between Mercury 2.5 and
+Sonnet 5.5; with 11 of 30 plans citing the upstream fix (§131.14) it fits memory, though a stronger model converging on
+the canonical fix also matches lines. Hence the private fixtures.
+
+**Result, fixtures** (`results/s131g-fixtures.jsonl`, 21 Oct 07:36-08:00, 80 runs, eight tasks x 2, interleaved):
+
+| model, my harness | ran | refused | perfect of ran | accuracy of ran | $ a run | model s a run | calls |
+|---|---|---|---|---|---|---|---|
+| Sonnet 5.5 (low) | 11 | 5 | 11 | 1.000 | 0.098 | 14 | 3.9 |
+| Haiku 5.5 | 16 | 0 | 15 | 0.988 | 0.0095 | 49 | 7.5 |
+| Mercury 3 | 16 | 0 | 14 | 0.946 | 0.0106 | 53 | 10.9 |
+| GPT-6 Luna (strict off) | 16 | 0 | 12 | 0.867 | 0.0049 | 102 | 8.9 |
+| Mercury 2.5 | 16 | 0 | 11 | 0.880 | 0.0029 | 38 | 10.8 |
+
+Sonnet 5.5 refused 5 of 16 on Claude Platform on AWS (`content_filter` on the planning prompt, §127.9); every run it
+made was perfect, so on tasks no model was trained on its lead holds. In my harness it costs about 10x Mercury 3 a run;
+the django "same price" (§131.13: $0.053 against $0.060 at list) is Claude Code with 84% of Sonnet 5.5's input from cache (§127.3; 97% was Sonnet 5's),
+not the model alone. Haiku 5.5, at Mercury 3's price class, matched or beat it on these tasks (15 against 14 of 16) at
+slightly lower cost and time; Inception's claim that Mercury 3 beats Haiku 5.5 is not borne out here (a scout: 16 runs a
+model, several tasks near ceiling). Per task, Luna and Mercury 2.5 lose the wrong-report tasks (misreport-discount,
+misreport-documented) that Haiku 5.5, Sonnet 5.5 and Mercury 3 mostly pass.
+
+**Haiku 5.5 on django, round 1** (`results/s131g-dj.jsonl`, sealed, 17bf856): 8 of 10, $0.023 a run, 9.5 calls; rounds 2-3
+and three SciCode rounds follow.
+
+**Haiku 5.5, full** (21 Oct 07:36-09:05, sealed, 17bf856; `results/s131g-dj.jsonl`, `results/s131-scicode-g.txt`, $1.4):
+django 20 of 30 (1/3 on 11790, 11815, 11848, 11885, 11999; 3/3 on the rest), $0.0234 a run, 9.7 calls, 1.8 min;
+SciCode 10, 11, 9 problems (10.0 a round), 33, 34, 32 sub-steps, $0.232 a round (summed from traces), 1.7 min a
+problem. Against Mercury 3 in the harness the day before: django −0.172 [−0.345, +0.000] (not paired by day, and the
+rule would call it not separable), SciCode 10.0 against 10.3. So Mercury 3 leads Haiku 5.5 on public django, is level on
+SciCode, and trails it slightly on the private fixtures (14 against 15 of 16); on the benchmark where Mercury 3 also
+reproduces more of upstream's lines (0.26, §131.16), it does best.
+
+**Haiku 5.5's web use** (same tool and deny lists): django 0 fetches; SciCode 25 calls in 5 runs, 5 returned text
+(arXiv papers, the pyqmc library's GitHub tree for the Ewald problem), and one attempt at `scicode-bench` refused. No
+benchmark source reached.
+
+**Fact-check of post 3 draft 2 (21 Oct), corrections to this section.** The jsDelivr run made 9 successful fetches
+(13 calls), not 23; the full run's Mercury 3 fetch calls were 37 on django and 29 on SciCode, not 51 and 41. Both wrong
+numbers came from joining `tool_call` to `tool_done` on `fp`, which repeats within a run and multiplies rows: count each
+event kind on its own. Claude Code's cache share for Sonnet 5.5 was 84% (§127.3), not 97%. New: Haiku 5.5's resolved django
+diffs reproduce 0.50 of upstream's distinctive lines (9 of 20 runs all of them), against Mercury 3's 0.26, so the line
+measure does not single Mercury 3 out. A Mercury 3 django run spends 67% of its wall time in model calls (94% on the
+fixtures) and writes 2.3x Mercury 2.5's output tokens, most of them reasoning; that, not tool time, is why it is slower.
+The fixtures are in the public repository since v0.1.0 (11 Oct), so they are recent rather than unpublished.
+
+### 131.17 One long page from one call: speed, reasoning effort and correctness; pre-registered probe (22 Oct)
+
+The author's proposed use for Mercury 3 in post 3 is a job that wants a lot of text from one call, fast, at about Haiku
+5.5's accuracy, rather than a long agent loop. Nothing here measured that: in agent runs a Mercury 3 call writes about
+1,650 tokens, 96% reasoning, at roughly 315 tokens a second marginal (a fit of call time on tokens over the s131f django
+traces; 0.9 s fixed a call, 14% of model time), against Haiku 5.5's 235 and Mercury 2.5's 800, with several runs at once.
+
+**Probe** (`scripts/long_output_probe.py`): one fully specified prompt asking for a sectioned calculator module (tokenizer,
+tree, parser, evaluator, printer, self-test; about 200-300 lines) as one code block, no tools, `max_tokens` 40,000, streamed,
+one call at a time so no call shares the provider with another. Arms: Mercury 3 high and low, Mercury 2.5 high and low,
+Haiku 5.5 high and low (OpenRouter), Sonnet 5.5 low (as in §127.6), 3 repeats, shuffled order per repeat. Recorded: time
+to first byte, first reasoning and first content, total, tokens (reasoning and visible), cost, the module's own self-test,
+and 63 hidden checks run under `sandbox-exec` (no network, writes only to its folder). The grader was checked first
+against a reference module written by hand: 63 of 63 (a literal number-format comparison was found and replaced by a
+parenthesis count before any model ran). Inception's direct API arms are in the script but returned 402 (no credit on
+that account), so the direct route is not measured; OpenRouter serves Mercury from Inception.
+
+**Rule for the post:** the use-case sentence ("a long page from one call, fast, at Haiku's accuracy") stands if, at an
+effort where Mercury 3's median hidden-check score is at least Haiku 5.5's (at the matching effort), its median total
+time is below Haiku 5.5's. Otherwise the post says what was measured instead. Three repeats show a direction, not a
+significant difference; reported as medians with the range.
+
+**Result** (`results/s131q-long-output.jsonl`, 22 Oct 09:30-10:10, 21 calls, $0.33). Medians, range in brackets;
+hidden checks of 63 per repeat (an unanswered call counts as no answer, not a score):
+
+| arm | total s | to first content s | tokens out (reasoning) | visible tok/s | cost | hidden checks |
+|---|---|---|---|---|---|---|
+| Mercury 3 high | 66 [52-74] | 49 (1 call) | 38.2k (38.2k) | 1,298 (1 call) | 1.3¢ | no answer, 63, no answer |
+| Mercury 3 low | 27 [25-36] | 24 | 15.8k (12.3k) | 1,098 | 0.56¢ | 2, 61, 63 |
+| Mercury 2.5 high | 23 [19-28] | 17 | 9.3k (6.4k) | 536 | 0.14¢ | 58, 0, 17 |
+| Mercury 2.5 low | 7 [6-9] | 1.4 | 3.4k (0.2k) | 598 | 0.05¢ | 35, 0, 0 |
+| Haiku 5.5 high | 135 [132-170] | 126 | 35.8k (28.9k) | about 400-800 | 1.8¢ | 62, 63, 62 |
+| Haiku 5.5 low | 58 [55-152] | 47 | 15.0k (9.3k) | about 460-510 | 0.76¢ | 63, 63, 62 |
+| Sonnet 5.5 low | 38 [34-41] (2 calls) | 19 | 6.4k (1.8k) | 237 | 6.6¢ | 63, 62 (1 dropped connection) |
+
+- **The grader was hand-checked** on every low score: the failures are the models' (Mercury 2.5's three syntax or
+  name errors that stop the import, an undefined `_TO_RE` in Mercury 3 low's first answer, `min()` of one argument and
+  an unconverted `round` digit count in several). Self-tests failed on 18 of 19 answers because the models' own asserts
+  were wrong, so the hidden checks are the accuracy measure. Haiku's visible tok/s is unreliable where it sends its
+  answer in one burst (two calls read 315k and 352k tok/s); the range shown is from the other calls.
+- **Mercury 3 at high effort reasoned to the 40,000-token cap on 2 of 3 calls and returned nothing**, as on SciCode
+  problem 70 (§131.11). At low it answered every time, in under half the time and cost.
+- **Inception's speed is real for the visible text** (about 1,100-1,300 tokens a second once the answer starts, against
+  Haiku's roughly 500 and Sonnet's 240), **but Mercury 3 first reasons 11-16k tokens even at low**, and that is where the
+  time goes: 24 s of a 27 s call before the first visible token.
+- **Rule:** Mercury 3 low's median hidden score (61) is below Haiku 5.5 low's (63), and at high its median call gives no
+  answer, so the use-case sentence does not stand as worded. What was measured instead: one long page from one call,
+  Mercury 3 at low took about half Haiku 5.5's time (27 against 58 s) at about three quarters of its cost, and was right
+  2 times in 3 where Haiku was right 3 in 3. Three repeats; a direction only.
+
+### 131.18 Mercury 3 at low against high effort, and whether its temperature arrives: pre-registered (22 Oct)
+
+The author asked what reasoning effort changes for Mercury 3 on the same problems: time, text written, cost and
+accuracy. The harness runs it at high in planning and execution (`agent/config.py`). What exists is thin: SciCode medium
+against high, one round, 9 of 15 each (§131.11); the step-down re-asks only runaway calls at low (§131.12); another
+project of the author's (an extraction pipeline) found low still reasons a median 7,383 tokens a call (§131.15). No low-effort run on any suite.
+
+**A. Low against high, subsets.** Arms `f3` (tree 17bf856, high) and `f3-low` (same tree, `--executor-reasoning low
+--planner-reasoning low`), sealed, interleaved:
+- django: 11790, 11848, 11885, 11964 (where `f3` resolved 2 of 3, so either arm can move) and 11880, 9296 (3 of 3, fast;
+  a check that low does not break easy tasks), 2 repeats each: 12 runs an arm.
+- SciCode: one round of 15 an arm (`SCI_MODELS` with the same flags).
+- Private tasks: `bench run --configs mercury3-only,mercury3-low`, §131.2's eight tasks x 2 repeats.
+Reported per arm and suite: resolved or perfect, wall minutes, model seconds, output and reasoning tokens a run, cost.
+**Rule:** low "keeps accuracy" if it is within 1 of 12 django runs, 1 SciCode problem and 2 of 16 private runs of high;
+low is "cheaper" or "faster" where `bench report --view compare` or the paired bootstrap puts the difference's interval
+off zero. These are subsets: a default change would need a full run, registered separately.
+
+**B. Temperature.** Mercury 3's docs say temperature is adjustable from 0.5 to 1.0 and do not say what happens outside
+it; for Mercury 2.5 Inception reset any value outside to 1.0 with a `warning` and OpenRouter dropped the warning (§85),
+and 0.5 sent through OpenRouter did not measurably reach the model (§125.1). `scripts/temperature_probe.py` with Mercury 3
+(its three forced-choice prompts, effort none, 20 samples an arm and prompt; arms unset, 1.0, 0.5, 0.0), recording any
+`warning` field. **Rule (as §125.1):** 0.5 arrives if the pooled modal share at 0.5 is at least 15 points above unset
+and 1.0. Only if it arrives does a follow-up test accuracy (the §131.17 probe at 0.5 against unset, 5 repeats). The direct
+API, where the reset would be reported, is not used: the author chose OpenRouter (it returned 402, no credit), so
+whether a value arrives is read from behavior only.
+
+**B result** (`results/s131r-temp-m3.jsonl`, 240 calls, about $0.02). Modal share of the most common answer, word /
+number / file, pooled: unset 0.40 / 0.50 / 0.85, 0.58; 1.0 0.35 / 0.25 / 0.90, 0.50; 0.5 0.35 / 0.35 / 1.00, 0.57;
+0.0 0.45 / 0.20 / 0.90, 0.52. No response carried a warning; no errors or empty answers. 0.5 is 1 point below unset,
+not 15 above: as with Mercury 2.5, a temperature sent through OpenRouter does not measurably reach Mercury 3, so the
+accuracy follow-up does not run.
+
+**A result** (`results/s131h-dj.jsonl`, `results/s131h-fixtures.jsonl`,
+`~/.cache/mercury-harness/scicode-runs/s131h-sci-{f3,f3-low}.out`; 22 Oct 10:11-11:19, about $1.2). Low minus high,
+paired bootstrap 95%:
+
+| suite | high | low | accuracy, low minus high | cost | time |
+|---|---|---|---|---|---|
+| django, 6 tasks x 2 | 6 of 12, 3.0¢, 2.23 min | 5 of 12, 1.8¢, 1.46 min | −0.08 [−0.33, +0.17] | −1.2¢ [−2.1, −0.4] | −0.77 min [−1.46, −0.20] |
+| SciCode, one round | 11 of 15, $0.18, 19.6 problem-min | 10 of 15, $0.11, 10.3 | −0.07 [−0.20, 0.00] | −0.45¢ a problem [−0.86, −0.15] | −0.66 min a problem [−1.18, −0.27] |
+| private tasks, 8 x 2 | 14 of 16 perfect, 0.9¢ | 12 of 16, 0.8¢ | −0.125 [−0.375, +0.125] | not distinguishable | model s 43 against 37, not distinguishable |
+
+django tokens a run: high 33.7k out (32.5k reasoning), 17.8 calls, 1.62 model min; low 19.2k (18.3k), 15.5 calls, 0.96.
+Both arms resolved fewer django runs than §131.13's f3 on these tasks (14 of 18), as four of the six are the hard ones.
+
+**By the rule low keeps accuracy** (within 1 of 12, 1 problem and 2 of 16) and **is cheaper and faster on django and
+SciCode** (intervals off zero, about 40% less cost and half the time); on the private tasks neither differs. Every
+accuracy difference sits at the margin and all three point the same way (31 against 27 of 43 pooled), so a small
+loss at low is possible and these subsets cannot rule it out. No default changes without a full run.
+
+### 131.19 Mercury 3 at low effort, the full run: pre-registered (22 Oct)
+
+§131.18's subsets found low about 40% cheaper and half the time on django and SciCode, with accuracy within the margins
+but one lower on every suite. The post's closing argument is price and speed against Haiku 5.5, so the author asked
+for the full run at low. Arm `f3-low` (tree 17bf856, as §131.13's `f3`, plus `--executor-reasoning low
+--planner-reasoning low`), sealed: django, the ten tasks x 3 (`s131i-dj`); SciCode, three rounds of 15
+(`s131i-sci-f3-low{1,2,3}`). Compared by task with §131.13's `f3` (20 Oct) and §131.16's `f-haiku55` (21 Oct), same
+tree, different days, so not paired in time.
+
+**Rule:** low "keeps accuracy" if django resolved is within 3 of 30 of `f3` (25 of 29, rate 0.86) and the SciCode mean
+is within 1 problem a round of `f3`'s 10.3; otherwise it "loses accuracy", reported with the bootstrap interval. Cost a
+run, wall minutes, model minutes and tokens are reported against `f3` and `f-haiku55` with paired-by-task bootstrap
+intervals. **For the post:** if low keeps accuracy, Mercury 3 at low is the row compared with Haiku 5.5 on price and
+speed, with high kept in the table; if it loses accuracy, the post reports low as a cheaper, faster, less accurate
+setting. Any run that reads a benchmark's own answer source (`harness trace leaks`) is voided, as in §131.13.
+
+**Result** (`results/s131i-dj.jsonl`, `~/.cache/mercury-harness/scicode-runs/s131i-sci-f3-low{1,2,3}.out`; 22 Oct
+11:25-11:50, $0.99; analysis script in the session scratchpad, `lowfull_analysis.py`). No run voided: 8 django runs
+tried GitHub or django's docs and all 10 fetches were refused; SciCode made none.
+
+| | django resolved | $ a run | wall min | model min | tokens out (reasoning) | SciCode a round | $ a round | problem-min a round |
+|---|---|---|---|---|---|---|---|---|
+| Mercury 3 high (`f3`, §131.13) | 25 of 29 | 0.0296 | 2.50 | 1.86 | 29.6k (28.4k) | 10, 10, 11 | 0.185 | 23.7 |
+| **Mercury 3 low** (`f3-low`) | **19 of 30** | 0.0216 | 1.38 | 1.04 | 20.7k (19.2k) | 10, 10, 9 | 0.111 | 10.4 |
+| Haiku 5.5 (`f-haiku55`, §131.16) | 20 of 30 | 0.0234 | 1.78 | | | 10, 11, 9 | 0.234 | 25.5 |
+
+Low minus high, paired by task and repeat: django resolved −0.24 [−0.41, −0.10], cost −0.76¢ [−1.83, +0.06], wall
+−1.09 min [−2.04, −0.51]; SciCode solved −0.04 a problem [−0.16, +0.07], cost −0.50¢ a problem [−0.70, −0.32],
+−0.88 min a problem [−1.37, −0.53]. Low minus Haiku 5.5: django −0.03 [−0.23, +0.17], cost −0.17¢ [−0.65, +0.31], wall
+−0.39 min [−0.66, −0.14]; SciCode −0.02 [−0.11, +0.07], cost −0.82¢ a problem [−1.34, −0.44], −1.0 min [−1.76, −0.49].
+
+- **By the rule low loses accuracy**: django 19 of 30 is 6 below high, past the margin of 3, and the interval excludes
+  zero. SciCode alone would keep it (9.7 against 10.3). The losses are all on the hard tasks: 11848, 11885 and 11964
+  went from 2, 2 and 2 of 3 to 0 of 3; every task high always resolved, low always resolved too.
+- **Low is faster everywhere** (django wall time −44%, SciCode problem-minutes −56%) and cheaper on SciCode (−40%); on
+  django the saving (−26%) does not clear zero, because low makes as many calls as high (18.2 against 17.9) with a
+  third fewer tokens.
+- **Against Haiku 5.5, Mercury 3 at low is level on accuracy on both suites** (19 against 20 of 30; 9.7 against 10.0),
+  about the same cost on django and half on SciCode, and faster on both. Different days, same tree.
+- **For the post** (the rule's second branch): low is a cheaper, faster, less accurate setting. High keeps the
+  harness's django lead; low trades it away for time and, on SciCode, cost.
+- **Tool gap found on the way:** `harness trace leaks` on a folder of symlinks to trace directories reports "no
+  benchmark-source fetches" (`rglob` does not follow symlinks), while the same check on each real folder finds the
+  refused fetches. A false negative in the contamination check. **Fixed** (489ecdb): `leaks_in` and recursive `holds_in` walk
+  with symlinks followed and cycles cut (`_rglob_following`); `tests/test_trace_leaks.py` fails on the old walk. The
+  folder of symlinks now reports the same 8 runs as the real folders. §131.13's leak check was `contamination.py` over every run, not this command, so it stands; of this session's
+  trace folders only the private-task one (`tr-fx`) is built of symlinks, and those tasks have no answer source online.

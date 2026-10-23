@@ -160,11 +160,18 @@ INCEPTION = Provider(
     base_url="https://api.inceptionlabs.ai/v1",
     key_service="InceptionLabs",
     key_env="INCEPTION_API_KEY",
-    models={"inception/mercury-2.5": "mercury-2.5", "inception/mercury-2": "mercury-2"},
+    models={
+        "inception/mercury-3": "mercury-3",  # assumed from the `mercury-2.5` naming pattern
+        "inception/mercury-2.5": "mercury-2.5",
+        "inception/mercury-2": "mercury-2",
+    },
     translate=_inception_body,
     # docs.inceptionlabs.ai/get-started/models, 2026-09-29 (mercury-2.5 at its
     # listed 80% discount; OpenRouter charges the same).
+    # mercury-3: OpenRouter /api/v1/models, 2026-10-19, at its launch discount (no
+    # announced end); list price is 0.20 / 0.02 / 0.70.
     prices={
+        "mercury-3": Price(input=0.10, cached_input=0.01, output=0.35),
         "mercury-2.5": Price(input=0.04, cached_input=0.004, output=0.15),
         "mercury-2": Price(input=0.25, cached_input=0.025, output=0.75),
     },
@@ -220,6 +227,7 @@ def build_client(settings: Any, **kwargs: Any) -> Any:
     temperature = getattr(settings, "mercury_temperature", None)
     max_tokens = getattr(settings, "mercury_max_tokens", None)
     content_stall = getattr(settings, "mercury_content_stall_s", None)
+    step_down = bool(getattr(settings, "runaway_effort_step_down", False))
 
     def build(provider: Provider) -> OpenRouterClient:
         key = settings.api_key if provider is OPENROUTER else provider.api_key()
@@ -234,6 +242,7 @@ def build_client(settings: Any, **kwargs: Any) -> Any:
             mercury_temperature=temperature,
             mercury_max_tokens=max_tokens,
             content_stall_s=content_stall,
+            runaway_step_down=step_down,
             **kwargs,
         )
 

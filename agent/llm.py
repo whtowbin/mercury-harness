@@ -386,6 +386,7 @@ class OpenRouterClient:
         mercury_temperature: float | None = None,
         mercury_max_tokens: int | None = None,
         content_stall_s: float | None = None,
+        runaway_step_down: bool = False,
     ):
         # Which API this client talks to, and in which dialect (agent/providers.py).
         # One transport for all of them, so every retry and stall bound applies.
@@ -407,6 +408,12 @@ class OpenRouterClient:
         # attempt deadline and the provider's own 504 at ~120s ended a runaway
         # (DESIGN-LOG §95). None leaves it off.
         self.content_stall_s = content_stall_s
+        # Settings.runaway_effort_step_down (DESIGN-LOG §131.12): when a Mercury call at medium
+        # or high effort is cut for no content, or ends at the token cap having only reasoned,
+        # ask again at low effort instead of repeating the same request. Mercury 3 streams no
+        # reasoning, and on SciCode 70 reasoned to the 16k cap without answering in 6 of 7
+        # calls at medium or high; at low it answered 2 of 3.
+        self.runaway_step_down = runaway_step_down
         # OpenRouter's provider preference ("latency", "throughput", "price"). A model
         # served by many providers varies >10x between them: GLM 5.3 Flash's median
         # time to first token was 0.6s on Together and 5-16s on most others, over 288
@@ -553,6 +560,14 @@ class OpenRouterClient:
 
         try:
             reply = self._accounted(self._send_adapting(model, body, end_once), model)
+            if self._steps_down(model, body) and _reasoned_to_the_cap(reply):
+                first = reply
+                body["reasoning"] = {"effort": "low"}
+                reply = self._accounted(self._send_adapting(model, body, end_once), model)
+                _add_usage(reply.usage, first.usage)
+                reply.warning = reply.warning or (
+                    "reasoned to the token cap without answering; asked again at low effort"
+                )
             if is_refusal(reply):
                 reply = self._retry_without_refused_wording(model, body, reply, end_once)
             if is_refusal(reply):
@@ -574,17 +589,34 @@ class OpenRouterClient:
 
         def send() -> Reply:
             request = self.provider.request(body)
+            escape = self._steps_down(model, body)
             if self.stream:
-                return self._request(lambda budget: self._stream_once(request, end_once, budget))
-            return self._request(lambda budget: self._complete_once(request, budget))
+                return self._request(
+                    lambda budget: self._stream_once(request, end_once, budget), escape
+                )
+            return self._request(lambda budget: self._complete_once(request, budget), escape)
 
-        for _ in range(2):
+        stepped = False
+        for _ in range(3):
             try:
-                return send()
+                reply = send()
+                if stepped:
+                    reply.warning = reply.warning or (
+                        "no content before the first-content cut; asked again at low effort"
+                    )
+                return reply
+            except _Runaway:
+                body["reasoning"] = {"effort": "low"}
+                stepped = True
             except LLMError as exc:
                 if not self._adapt_to_refusal(model, body, str(exc)):
                     raise
         return send()
+
+    def _steps_down(self, model: str, body: dict[str, Any]) -> bool:
+        """Whether a runaway of this request is re-asked at low effort (§131.12)."""
+        effort = (body.get("reasoning") or {}).get("effort")
+        return self.runaway_step_down and _is_diffusion_model(model) and effort in _STEP_DOWN_FROM
 
     def _tools_for(
         self, model: str, tools: list[dict], tool_choice: str | dict | None
@@ -654,7 +686,7 @@ class OpenRouterClient:
 
     # -- transport --------------------------------------------------------
 
-    def _request(self, attempt_fn: Callable[[float], Reply]) -> Reply:
+    def _request(self, attempt_fn: Callable[[float], Reply], escape_on_cut: bool = False) -> Reply:
         """Attempt the call, retrying, but never past `max_call_s` in total.
 
         `self.timeout` bounds one attempt. Nothing bounded the *sequence* of
@@ -692,13 +724,7 @@ class OpenRouterClient:
                 reply = attempt_fn(remaining)
             except (_Retryable, requests.RequestException) as exc:
                 last_error = exc
-                if self.on_attempt_failed:
-                    with contextlib.suppress(Exception):
-                        self.on_attempt_failed(
-                            attempt + 1,
-                            time.time() - attempt_started,
-                            f"{type(exc).__name__}: {exc}"[:170] + _stream_detail(exc),
-                        )
+                self._report_failed_attempt(exc, attempt, attempt_started, escape_on_cut)
                 retry_after = getattr(exc, "retry_after", None)
                 # The last attempt has nothing after it, so a backoff here
                 # waits for a request that will never be made — 60s of it
@@ -742,6 +768,22 @@ class OpenRouterClient:
             f"request failed after {self.max_retries + 1} attempts "
             f"or {self.max_call_s:.0f}s: {last_error}"
         )
+
+    def _report_failed_attempt(
+        self, exc: Exception, attempt: int, attempt_started: float, escape_on_cut: bool
+    ) -> None:
+        """Tell on_attempt_failed, then, for a cut for no content when the caller
+        will ask again at a lower effort instead of repeating it, leave the retry
+        loop (§131.12)."""
+        if self.on_attempt_failed:
+            with contextlib.suppress(Exception):
+                self.on_attempt_failed(
+                    attempt + 1,
+                    time.time() - attempt_started,
+                    f"{type(exc).__name__}: {exc}"[:170] + _stream_detail(exc),
+                )
+        if escape_on_cut and isinstance(exc, _ContentCut):
+            raise _Runaway(str(exc)) from exc
 
     def _attempt_timeout(self, budget: float | None) -> float:
         """How long this attempt may take, given what is left of the call's
@@ -954,7 +996,7 @@ class OpenRouterClient:
             if content_cut:
                 # Shutting the socket down can end the read cleanly rather than
                 # with an error, which would return an empty reply as if final.
-                raise _Retryable("cut off with no content")
+                raise _ContentCut("cut off with no content")
             if stall_cut:
                 raise _Retryable(f"silent for {stall_limit:g}s after the stream started")
         except Exception as exc:
@@ -963,7 +1005,7 @@ class OpenRouterClient:
             # what actually happened so the retry loop and the trace see a
             # deadline rather than a mystery reset.
             if content_cut:
-                raise _Retryable(
+                raise _ContentCut(
                     f"no content within {content_limit:.0f}s, only keep-alives "
                     "(a healthy Mercury call starts in about a second)"
                 ) from exc
@@ -1090,6 +1132,34 @@ class _Retryable(Exception):
     def __init__(self, message: str, retry_after: str | None = None):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class _ContentCut(_Retryable):
+    """A Mercury attempt cut for producing no content within the first-content bound."""
+
+
+class _Runaway(Exception):
+    """Raised out of _request on a content cut when the caller steps effort down instead."""
+
+
+# Efforts a runaway is stepped down from (§131.12); low and off are left alone.
+_STEP_DOWN_FROM = frozenset({"medium", "high", "xhigh", "max"})
+
+
+def _reasoned_to_the_cap(reply: Reply) -> bool:
+    """A reply that ended at the token cap with neither text nor a tool call."""
+    return reply.finish_reason == "length" and not reply.content.strip() and not reply.tool_calls
+
+
+def _add_usage(usage: Usage, earlier: Usage) -> None:
+    """Fold an abandoned call's spend into the reply that replaced it, so the
+    trace and the spend cap still count it."""
+    usage.prompt_tokens += earlier.prompt_tokens
+    usage.completion_tokens += earlier.completion_tokens
+    usage.cached_tokens += earlier.cached_tokens
+    usage.reasoning_tokens += earlier.reasoning_tokens
+    usage.cost_usd += earlier.cost_usd
+    usage.latency_s += earlier.latency_s
 
 
 # After `data: [DONE]` a chunked SSE response still has its terminal
